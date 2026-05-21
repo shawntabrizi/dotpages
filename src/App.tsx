@@ -26,7 +26,12 @@ import { resizeImageToFit } from "./image-resize.ts";
 type View = "edit" | "preview" | "deploy";
 type DeployResult = DeployPreview | DeploySuccess;
 
-const DEPLOY_STEPS = [
+interface ProgressStep {
+    readonly id: string;
+    readonly label: string;
+}
+
+const DEPLOY_STEPS: readonly ProgressStep[] = [
     { id: "prepare", label: "Prepare" },
     { id: "bulletin", label: "Store" },
     { id: "account", label: "Account" },
@@ -35,7 +40,23 @@ const DEPLOY_STEPS = [
     { id: "wait", label: "Wait" },
     { id: "register", label: "Register" },
     { id: "link", label: "Link" },
-] as const;
+];
+
+const UPLOAD_STEPS: readonly ProgressStep[] = [
+    { id: "prepare", label: "Prepare" },
+    { id: "sign", label: "Sign" },
+    { id: "broadcast", label: "Broadcast" },
+    { id: "in-block", label: "In Block" },
+    { id: "finalized", label: "Finalized" },
+];
+
+function stepForUploadStatus(message: string): number {
+    if (message.startsWith("signing")) return 1;
+    if (message.startsWith("broadcasting")) return 2;
+    if (message.startsWith("in-block")) return 3;
+    if (message.startsWith("finalized")) return 4;
+    return 0;
+}
 
 function stepForDeployStatus(message: string): number {
     if (message.startsWith("Bulletin:")) return 1;
@@ -170,6 +191,7 @@ export default function App() {
             signerAddress: activeAccount.address,
             displayName: activeAccount.displayName,
             label,
+            onStatus,
         });
         return stored.ipfsUrl;
     };
@@ -404,7 +426,11 @@ export default function App() {
                     </button>
 
                     {busy && status && deployStep !== null && (
-                        <DeployProgress step={deployStep} status={status} />
+                        <StepProgress
+                            steps={DEPLOY_STEPS}
+                            step={deployStep}
+                            status={status}
+                        />
                     )}
 
                     {result && (
@@ -498,27 +524,35 @@ export default function App() {
     );
 }
 
-function DeployProgress({ step, status }: { step: number; status: string }) {
-    const currentStep = DEPLOY_STEPS[Math.min(step, DEPLOY_STEPS.length - 1)];
-    const stepNumber = Math.min(step + 1, DEPLOY_STEPS.length);
+function StepProgress({
+    steps,
+    step,
+    status,
+}: {
+    steps: readonly ProgressStep[];
+    step: number;
+    status: string;
+}) {
+    const currentStep = steps[Math.min(step, steps.length - 1)];
+    const stepNumber = Math.min(step + 1, steps.length);
 
     return (
         <div className="deploy-progress" role="status" aria-live="polite">
             <div className="progress-meta">
-                <span>{`Step ${stepNumber} of ${DEPLOY_STEPS.length}`}</span>
+                <span>{`Step ${stepNumber} of ${steps.length}`}</span>
                 <span>{currentStep.label}</span>
             </div>
             <div
                 className="progress-bar"
                 role="progressbar"
                 aria-valuemin={1}
-                aria-valuemax={DEPLOY_STEPS.length}
+                aria-valuemax={steps.length}
                 aria-valuenow={stepNumber}
                 aria-valuetext={`${currentStep.label}: ${status}`}
             >
-                {DEPLOY_STEPS.map((deployStep, index) => (
+                {steps.map((s, index) => (
                     <span
-                        key={deployStep.id}
+                        key={s.id}
                         className={[
                             "progress-segment",
                             index < step ? "is-complete" : "",
@@ -705,12 +739,19 @@ function BlockView({
                                 />
                                 <span>
                                     {uploading
-                                        ? uploadStatus
+                                        ? "Uploading…"
                                         : maxStoreBytes !== null && maxStoreBytes > 0
                                           ? `Upload image (auto-resize → ≤${Math.floor(maxStoreBytes / 1024)} KB)`
                                           : "Upload image"}
                                 </span>
                             </label>
+                            {uploading && uploadStatus && (
+                                <StepProgress
+                                    steps={UPLOAD_STEPS}
+                                    step={stepForUploadStatus(uploadStatus)}
+                                    status={uploadStatus}
+                                />
+                            )}
                             <Editable
                                 tag="span"
                                 value={block.url}
