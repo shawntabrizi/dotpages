@@ -3,7 +3,7 @@ import { Editor } from "./Editor.tsx";
 import { Preview } from "./Preview.tsx";
 import { DEFAULT_CONTENT, renderHtml, type SiteContent } from "./template.ts";
 import {
-    deployToBulletin,
+    deployFull,
     previewDeploy,
     type DeployPreview,
     type DeploySuccess,
@@ -26,42 +26,51 @@ export default function App() {
     const [result, setResult] = useState<DeployResult | null>(null);
     const [deployError, setDeployError] = useState<string | null>(null);
 
-    const [useDev, setUseDev] = useState(false);
+    // //Bob is the default. Users opt INTO their own account; the auto-host
+    // probe doesn't run until they ask for it, which keeps the standalone
+    // browser case quiet.
+    const [useOwnedAccount, setUseOwnedAccount] = useState(false);
     const [hostAccount, setHostAccount] = useState<ActiveAccount | null>(null);
     const [extensionAccount, setExtensionAccount] = useState<ActiveAccount | null>(null);
-    const [hostAttempted, setHostAttempted] = useState(false);
-    const [hostError, setHostError] = useState<string | null>(null);
-    const [extensionError, setExtensionError] = useState<string | null>(null);
+    const [resolvingOwned, setResolvingOwned] = useState(false);
+    const [ownedError, setOwnedError] = useState<string | null>(null);
 
     const devAccount = useMemo(() => getDevAccount(), []);
-    const activeAccount: ActiveAccount | null = useDev
-        ? devAccount
-        : extensionAccount ?? hostAccount;
+    const activeAccount: ActiveAccount | null = useOwnedAccount
+        ? extensionAccount ?? hostAccount
+        : devAccount;
 
+    // When the user toggles ON "sign with my own account", try the host signer
+    // (Polkadot Desktop / Mobile) once. If host fails, the "Connect browser
+    // wallet" button below offers the standalone fallback. Toggling OFF
+    // doesn't tear down the resolved account — the dev path simply ignores it.
     useEffect(() => {
+        if (!useOwnedAccount || hostAccount || extensionAccount) return;
+        setResolvingOwned(true);
+        setOwnedError(null);
         tryHostAccount()
             .then((account) => {
                 if (account) setHostAccount(account);
             })
             .catch((cause) => {
-                setHostError(cause instanceof Error ? cause.message : String(cause));
+                setOwnedError(cause instanceof Error ? cause.message : String(cause));
             })
-            .finally(() => setHostAttempted(true));
-    }, []);
+            .finally(() => setResolvingOwned(false));
+    }, [useOwnedAccount, hostAccount, extensionAccount]);
 
     const connectExtension = async () => {
-        setExtensionError(null);
+        setOwnedError(null);
         try {
             const account = await tryExtensionAccount();
             if (account) {
                 setExtensionAccount(account);
             } else {
-                setExtensionError(
-                    "No browser wallet found. Install Talisman, SubWallet, or Polkadot.js — or tick //Bob below.",
+                setOwnedError(
+                    "No browser wallet found. Install Talisman, SubWallet, or Polkadot.js — or untick the box to deploy as //Bob.",
                 );
             }
         } catch (cause) {
-            setExtensionError(cause instanceof Error ? cause.message : String(cause));
+            setOwnedError(cause instanceof Error ? cause.message : String(cause));
         }
     };
 
@@ -72,11 +81,8 @@ export default function App() {
         setStatus(null);
         try {
             const html = renderHtml(content);
-            // Only the //Bob path actually hits chain today. Host's signer is
-            // stubbed; extension accounts may not have Bulletin authorization
-            // — both fall back to a no-op preview.
             if (activeAccount?.source === "dev") {
-                const stored = await deployToBulletin(html, domain || null, activeAccount, setStatus);
+                const stored = await deployFull(html, domain || null, activeAccount, setStatus);
                 setResult(stored);
             } else {
                 const preview = await previewDeploy(html, domain || null);
@@ -90,8 +96,12 @@ export default function App() {
         }
     };
 
-    const showStandaloneHints =
-        hostAttempted && !hostAccount && !extensionAccount && !useDev;
+    // The Deploy button stays enabled when Bob is selected (always available)
+    // OR when the user has actually resolved an owned account. Going through
+    // "owned mode" without a signer would deploy nothing.
+    const canDeploy = !busy && activeAccount !== null;
+    const showOwnedHint =
+        useOwnedAccount && !hostAccount && !extensionAccount && !resolvingOwned;
 
     return (
         <>
@@ -103,7 +113,7 @@ export default function App() {
                     </span>
                 ) : (
                     <span className="status-chip">
-                        {hostAttempted ? "no signer" : "connecting…"}
+                        {resolvingOwned ? "connecting…" : "no signer"}
                     </span>
                 )}
             </header>
@@ -125,7 +135,7 @@ export default function App() {
                         <button
                             className="btn btn-primary"
                             onClick={deploy}
-                            disabled={busy}
+                            disabled={!canDeploy}
                         >
                             {busy ? "Deploying…" : "Deploy"}
                         </button>
@@ -135,16 +145,21 @@ export default function App() {
                         <label className="checkbox">
                             <input
                                 type="checkbox"
-                                checked={useDev}
-                                onChange={(e) => setUseDev(e.target.checked)}
+                                checked={useOwnedAccount}
+                                onChange={(e) => setUseOwnedAccount(e.target.checked)}
                             />
-                            <span>Use //Bob — shared test account, no wallet needed</span>
+                            <span>
+                                Sign with my own account
+                                <span className="checkbox-hint">
+                                    {" "}— default is //Bob (shared testnet)
+                                </span>
+                            </span>
                         </label>
-                        {!useDev && !extensionAccount && hostAttempted && (
+                        {useOwnedAccount && !hostAccount && !extensionAccount && (
                             <button
                                 className="btn btn-secondary"
                                 onClick={connectExtension}
-                                disabled={!hasInjectedExtension()}
+                                disabled={!hasInjectedExtension() || resolvingOwned}
                                 title={
                                     hasInjectedExtension()
                                         ? "Connect Talisman, SubWallet, or Polkadot.js"
@@ -158,19 +173,16 @@ export default function App() {
 
                     {busy && status && <p className="status">{status}</p>}
 
-                    {showStandaloneHints && (
+                    {showOwnedHint && (
                         <p className="hint">
-                            Host signer not available — open in{" "}
+                            No host signer detected. Open this app in{" "}
                             <strong>Polkadot Desktop</strong> or{" "}
-                            <strong>Polkadot Mobile</strong> to sign with your account,
-                            connect a browser wallet, or tick the //Bob box to deploy
-                            under a shared test account.
+                            <strong>Polkadot Mobile</strong> to sign with your account, or
+                            click <strong>Connect browser wallet</strong>. Untick the box to
+                            deploy as //Bob (no setup needed).
                         </p>
                     )}
-                    {hostError && !hostAccount && (
-                        <p className="hint subtle">Host: {hostError}</p>
-                    )}
-                    {extensionError && <p className="error">{extensionError}</p>}
+                    {ownedError && <p className="hint subtle">{ownedError}</p>}
 
                     {result && <ResultCard result={result} account={activeAccount} />}
                     {deployError && <pre className="error error-block">{deployError}</pre>}
@@ -217,18 +229,30 @@ function ResultCard({
             </Row>
             {result.kind === "stored" ? (
                 <>
-                    <Row label="block">
-                        #{result.blockNumber.toLocaleString()} tx[{result.txIndex}]
-                    </Row>
-                    <p className="result-note success">
-                        Stored on Bulletin Chain. Fetch the bytes via the gateway link above.
-                        DotNS register (the <code>.dot.li</code> mapping) is not wired yet.
-                    </p>
+                    <Row label="block">#{result.blockNumber.toLocaleString()}</Row>
+                    {result.dotMapped ? (
+                        <p className="result-note success">
+                            Live on{" "}
+                            <a href={result.url} target="_blank" rel="noopener">
+                                {result.url}
+                            </a>
+                            . The <code>.dot</code> name is registered to your account and
+                            points at the Bulletin-stored content. Resolution may take a few
+                            seconds to propagate.
+                        </p>
+                    ) : (
+                        <p className="result-note">
+                            Stored on Bulletin Chain ✓. The <code>.dot.li</code> mapping
+                            step failed — see the status banner above for the reason. The
+                            bytes are still retrievable via the gateway link.
+                        </p>
+                    )}
                 </>
             ) : (
                 <p className="result-note">
-                    Preview only — chain submission for {account?.source ?? "this signer"} is not
-                    wired. Tick the //Bob box to do an end-to-end deploy.
+                    Preview only — chain submission for {account?.source ?? "this signer"}{" "}
+                    is not wired. Untick "Sign with my own account" to do an end-to-end
+                    deploy as //Bob.
                 </p>
             )}
         </div>

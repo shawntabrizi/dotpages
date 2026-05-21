@@ -249,6 +249,7 @@ main {
 }
 .checkbox input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 .checkbox:has(input:checked) { color: var(--text); }
+.checkbox-hint { color: var(--text2); opacity: 0.7; }
 
 .source-dev { background: rgba(230, 0, 122, 0.15); border-color: rgba(230, 0, 122, 0.35); color: var(--accent); }
 .source-extension { background: rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.35); color: #a5b4fc; }

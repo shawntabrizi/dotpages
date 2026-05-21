@@ -10,10 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ensdomains/content-hash": "^3.0.0",
     "@noble/hashes": "^1.4.0",
     "@novasamatech/host-api": "0.7.8",
     "@novasamatech/product-sdk": "0.7.8",
     "@parity/product-sdk-address": "^0.1.1",
+    "@parity/product-sdk-contracts": "^0.4.0",
     "@parity/product-sdk-crypto": "^0.1.1",
     "@parity/product-sdk-descriptors": "^0.3.0",
     "@parity/product-sdk-host": "^0.2.0",
@@ -26,7 +28,8 @@
     "multiformats": "^13.3.1",
     "polkadot-api": "^2.1.2",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "viem": "^2.49.3"
   },
   "_comment_overrides": "Mirrors playground-app-template's overrides — @polkadot-api/json-rpc-provider is the standard upstream workaround.",
   "overrides": {

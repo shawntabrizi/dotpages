@@ -35,15 +35,54 @@ hello-playground/
 
 [^1]: Inline reference for the protocol detail — not the actual link. See the skill in `~/.claude/skills/bulletin-storage` for the authoritative version.
 
-## What's NOT wired (and why)
+## End-to-end deploy
 
-The "Deploy" button stops at **preview**: it computes the bytes + CID + target name, shows them, and prints `Chain submission is not yet wired`. Three reasons it's not a one-line follow-up:
+When //Bob is selected, "Deploy" runs the full chain dance via direct `pallet-revive` contract calls — no `bulletin-deploy`, no Kubo, no backend. Architecture ported from [dotvillages / dotdot-deployer](https://github.com/paritytech/dotdot-deployer) and re-pointed at paseo-next-v2 endpoints + contracts.
 
-1. **Open question on the `.dot.li` resolver.** Bulletin storage of a raw single-file (codec `0x55`) gives you a `bafkrei…` CID. The CLI's `dot deploy` path goes through bulletin-deploy, which builds a UnixFS DAG-PB directory containing `index.html` (a `bafybei…` CID). We don't know empirically whether the `.dot.li` resolver SPA accepts the raw-codec single-file CID, or requires the directory wrapper. **One quick test before wiring this**: deploy a raw blob via `TransactionStorage.store`, point a fresh DotNS contenthash at the resulting CID, load `<name>.dot.li`, check whether it renders or 404s. If raw works, the rest is ~50 LOC. If we need a wrapper, that's another ~150 LOC of hand-built DAG-PB protobuf (no Kubo needed, but more glue).
-2. **DotNS register isn't a single SDK call yet.** The CLI does this via `bulletin-deploy` + `pallet-revive`. Calling the DotNS contract directly from browser PAPI needs the ABI, the live contract addresses (already in `playground-cli/src/config.ts`), and the same `withSpan` retry + commit-reveal logic — non-trivial.
-3. **Resource allocation.** `BulletInAllowance` and `SmartContractAllowance` are requested at connect time, but we don't yet verify the outcome before submitting. Unauthorized stores fail **silently** on Bulletin Chain (per the skill's Global Invariants), so we'd need to gate the submit on a confirmed `Allocated` outcome.
+Three phases, surfaced live in the status banner:
 
-`src/deploy.ts` has TODO comments at each of these handoff points.
+1. **Bulletin store** — `TransactionStorage.Authorizations` check → `TransactionStorage.store({ data: bytes })` → wait for inclusion. Yields CID + block.
+2. **DotNS register** (ENS-style commit-reveal):
+   - `Revive.map_account()` (one-shot, cached per session)
+   - `REGISTRAR_CONTROLLER.makeCommitment(...)` (read-only)
+   - `REGISTRAR_CONTROLLER.commit(commitment)` (extrinsic)
+   - Wait `minCommitmentAge` (~60 s) — front-running protection, mandatory
+   - `POP_RULES.priceWithoutCheck(label, ownerH160)` → price × 1.1 / NATIVE_TO_ETH_RATIO
+   - `REGISTRAR_CONTROLLER.register(registration)` (extrinsic, with payment value)
+3. **Content hash bind** — `CONTENT_RESOLVER.setContenthash(namehash("<label>.dot"), encodeIpfsContenthash(cid))`
+
+The DotNS phase is **best-effort**: if any of register / setContenthash fails (most commonly because //Bob has no PAS for fees on Asset Hub Next), the result card still shows the successful Bulletin store + gateway URL. The status banner surfaces the exact reason.
+
+### Lib layout
+
+```
+src/lib/
+├── polkadot/
+│   ├── constants.ts        ← Bulletin + AH-Next RPCs, 5 DotNS contract addresses, NATIVE_TO_ETH_RATIO
+│   └── clients.ts          ← Cached PAPI clients (direct WS today; createPapiProvider for host follow-up)
+├── bulletin/
+│   ├── submit-and-wait.ts  ← Observable → Promise tx helper (handles signed/broadcast/inBlock/finalized)
+│   ├── cid.ts              ← Blake2b-256 raw-codec CID
+│   └── store.ts            ← Authorization check + TransactionStorage.store
+└── dotns/
+    ├── abis.ts             ← REGISTRY / REGISTRAR_CONTROLLER / CONTENT_RESOLVER / POP_RULES Solidity-style fragments
+    ├── namehash.ts         ← viem namehash wrapper
+    ├── address.ts          ← SS58 → H160 via ReviveApi.address (cached)
+    ├── contracts.ts        ← ensureAccountMapped + dryRunContractCall + submitContractCall
+    ├── register.ts         ← Commit-reveal flow
+    └── content-hash.ts     ← encodeIpfsContenthash + setContenthash submission
+```
+
+### Prereqs for the //Bob path to actually succeed
+
+- **Bulletin authorization for //Bob's SS58 address** (`5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty`). One-time via [the self-serve faucet](https://paritytech.github.io/polkadot-bulletin-chain/authorizations?tab=faucet).
+- **PAS on Asset Hub Next** for //Bob's mapped H160. Contract calls aren't feeless — register + setContenthash + the initial map_account all need fees. Use [the PAS faucet](https://faucet.polkadot.io/) — pick "Paseo Asset Hub Next". (A future iteration could auto-top-up from Alice, mirroring `bulletin-deploy.attemptTestnetTopUp`.)
+- **Bunch of patience for the ~60 s commitment age** between commit and register. Protocol-mandated.
+
+Host (Polkadot Desktop) and extension (Talisman / Polkadot.js / SubWallet) paths today fall back to **preview-only** — the chain submission still needs:
+
+- Host signer's `signBytes` to map through `signerManager.signRaw` instead of the stub PAPI signer
+- Either same prereqs as //Bob (Bulletin + PAS) or a fresh session signer with allocations granted via `requestResourceAllocation`
 
 ## Run
 
