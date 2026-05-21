@@ -115,7 +115,7 @@ footer { margin-top: 64px; opacity: 0.4; font-size: 12px; }
     <h1>${escape(content.header)}</h1>
     <p class="subheader">${escape(content.subheader)}</p>
     ${blocks}
-    <footer>made with hello-playground</footer>
+    <footer>made with <a href="https://github.com/shawntabrizi/hello-playground" target="_blank" rel="noopener">hello-playground</a></footer>
 </main>
 </body>
 </html>

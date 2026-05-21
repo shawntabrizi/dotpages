@@ -67,7 +67,6 @@ body {
 }
 
 .block { position: relative; }
-.block.is-editing { padding-right: 32px; }
 
 .block-remove {
     position: absolute;
