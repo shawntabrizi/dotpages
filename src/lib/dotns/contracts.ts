@@ -10,6 +10,7 @@ import { submitAndWait, type DeployStatus } from "../bulletin/submit-and-wait.ts
 
 const MAX_WEIGHT = 18446744073709551615n;
 const MIN_STORAGE_DEPOSIT = 2_000_000_000_000n; // 2 PAS
+const ZERO_H160 = "0x0000000000000000000000000000000000000000";
 
 const GAS_MULTIPLIER = 4n;
 const DEFAULT_REF_TIME = 5_000_000_000n;
@@ -24,6 +25,37 @@ interface DryRunResult {
 
 const mappedAccounts = new Set<string>();
 
+function bytesToHex(data: unknown): `0x${string}` {
+    if (data instanceof Uint8Array) {
+        return `0x${Array.from(data, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+    }
+
+    const maybeBinary = data as
+        | { asHex?: () => string; asBytes?: () => Uint8Array }
+        | null
+        | undefined;
+    const asHex = maybeBinary?.asHex?.();
+    if (asHex?.startsWith("0x")) return asHex as `0x${string}`;
+
+    const asBytes = maybeBinary?.asBytes?.();
+    if (asBytes) return bytesToHex(asBytes);
+
+    return "0x";
+}
+
+function toBigInt(value: unknown): bigint {
+    if (typeof value === "bigint") return value;
+    if (typeof value === "number") return BigInt(value);
+    return 0n;
+}
+
+function chargedStorageDeposit(value: unknown): bigint {
+    const deposit = value as { type?: string; value?: unknown } | null | undefined;
+    if (deposit?.type === "Charge") return toBigInt(deposit.value);
+    if (deposit?.type === "Refund") return 0n;
+    return toBigInt(value);
+}
+
 export async function ensureAccountMapped(
     signerAddress: string,
     signer: PolkadotSigner,
@@ -37,7 +69,7 @@ export async function ensureAccountMapped(
     try {
         const test = await unsafeApi.apis.ReviveApi.call(
             signerAddress,
-            Binary.fromHex("0x0000000000000000000000000000000000000000"),
+            ZERO_H160,
             0n,
             { ref_time: MAX_WEIGHT, proof_size: MAX_WEIGHT },
             MAX_WEIGHT,
@@ -72,7 +104,7 @@ export async function ensureAccountMapped(
         try {
             const check = await unsafeApi.apis.ReviveApi.call(
                 signerAddress,
-                Binary.fromHex("0x0000000000000000000000000000000000000000"),
+                ZERO_H160,
                 0n,
                 undefined,
                 undefined,
@@ -112,7 +144,7 @@ export async function dryRunContractCall(
 
     const dryRun = await unsafeApi.apis.ReviveApi.call(
         callerAddress,
-        Binary.fromHex(contractAddress.toLowerCase() as `0x${string}`),
+        contractAddress.toLowerCase() as `0x${string}`,
         value,
         { ref_time: MAX_WEIGHT, proof_size: MAX_WEIGHT },
         MAX_WEIGHT,
@@ -122,34 +154,14 @@ export async function dryRunContractCall(
     const r = dryRun as {
         result?: {
             success?: boolean;
-            value?: { flags?: number; data?: { asHex?: () => string; asBytes?: () => Uint8Array } };
+            value?: { flags?: number; data?: unknown };
         };
-        weight_required?: { ref_time?: bigint | number; proof_size?: bigint | number };
-        storage_deposit?: { value?: bigint | number };
+        weight_required?: {
+            ref_time?: bigint | number;
+            proof_size?: bigint | number;
+        };
+        storage_deposit?: unknown;
     };
-
-    const data = r.result?.value?.data;
-    let returnDataHex: `0x${string}` = "0x";
-    if (data) {
-        try {
-            returnDataHex = data.asHex?.() as `0x${string}`;
-        } catch {
-            // fall through
-        }
-        if (!returnDataHex || returnDataHex === "0x") {
-            try {
-                const bytes = data.asBytes?.();
-                if (bytes instanceof Uint8Array && bytes.length > 0) {
-                    returnDataHex = ("0x" +
-                        Array.from(bytes)
-                            .map((b) => b.toString(16).padStart(2, "0"))
-                            .join("")) as `0x${string}`;
-                }
-            } catch {
-                // ignore
-            }
-        }
-    }
 
     const flags = r.result?.value?.flags ?? 0;
     const success = r.result?.success === true && !(flags & 1);
@@ -160,8 +172,8 @@ export async function dryRunContractCall(
             refTime: BigInt(r.weight_required?.ref_time ?? 0),
             proofSize: BigInt(r.weight_required?.proof_size ?? 0),
         },
-        storageDeposit: BigInt(r.storage_deposit?.value ?? 0),
-        returnData: returnDataHex,
+        storageDeposit: chargedStorageDeposit(r.storage_deposit),
+        returnData: bytesToHex(r.result?.value?.data),
     };
 }
 
