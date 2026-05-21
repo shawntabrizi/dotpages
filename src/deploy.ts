@@ -35,6 +35,8 @@ export interface DeploySuccess {
     blockNumber: number;
     /** True iff DotNS register + setContenthash both succeeded — `<name>.dot.li` resolves. */
     dotMapped: boolean;
+    /** Reason DotNS failed, if it did. Null when dotMapped===true. */
+    dotError: string | null;
 }
 
 export type StatusFn = (message: string) => void;
@@ -102,8 +104,11 @@ export async function deployFull(
 
     // Phase 2 — DotNS register + setContenthash. Best-effort: if either fails
     // we still return a successful Bulletin store with `dotMapped: false`, so
-    // the user has their CID and gateway URL even if AH-Next refused.
+    // the user has their CID and gateway URL even if AH-Next refused. The
+    // error message is captured on `dotError` so the UI can show what
+    // actually went wrong and (where possible) what to do about it.
     let dotMapped = false;
+    let dotError: string | null = null;
     try {
         onStatus("DotNS: resolving owner H160…");
         const ownerEvmAddress = await getEvmAddress(account.address);
@@ -132,8 +137,8 @@ export async function deployFull(
 
         dotMapped = true;
     } catch (cause) {
-        const msg = cause instanceof Error ? cause.message : String(cause);
-        onStatus(`DotNS step failed — Bulletin store still succeeded. ${msg}`);
+        dotError = cause instanceof Error ? cause.message : String(cause);
+        onStatus(`DotNS step failed — Bulletin store still succeeded. ${dotError}`);
         // Don't rethrow: surface the partial-success to the caller so the UI
         // can show the gateway URL even when the name mapping fell over.
     }
@@ -148,5 +153,6 @@ export async function deployFull(
         blockHash: stored.blockHash,
         blockNumber: stored.blockNumber,
         dotMapped,
+        dotError,
     };
 }

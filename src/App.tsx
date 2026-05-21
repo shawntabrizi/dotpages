@@ -328,11 +328,21 @@ export default function App() {
                                     . Resolution may take a few seconds to propagate.
                                 </p>
                             ) : result.kind === "stored" ? (
-                                <p className="result-note">
-                                    Stored on Bulletin ✓. The <code>.dot.li</code> mapping
-                                    step failed — see the status above for details. Bytes
-                                    still retrievable via the gateway link.
-                                </p>
+                                <div className="result-note">
+                                    <p>
+                                        Stored on Bulletin ✓. The <code>.dot.li</code>{" "}
+                                        mapping step failed. Bytes still retrievable via
+                                        the gateway link.
+                                    </p>
+                                    {result.dotError && (
+                                        <pre className="error-block">
+                                            {result.dotError}
+                                        </pre>
+                                    )}
+                                    {result.dotError && (
+                                        <DotErrorHint message={result.dotError} />
+                                    )}
+                                </div>
                             ) : (
                                 <p className="result-note">
                                     Preview only — chain submission for{" "}
@@ -525,6 +535,84 @@ function BlockView({
             )}
             {block.type === "divider" && <hr className="site-divider" />}
         </div>
+    );
+}
+
+// Heuristic hint mapping common DotNS failures to actionable next steps.
+// The error strings come from pallet-revive dispatch errors, JSON-serialised
+// in submit-and-wait, so they're greppable.
+function DotErrorHint({ message }: { message: string }) {
+    const lower = message.toLowerCase();
+
+    if (
+        lower.includes("balance") ||
+        lower.includes("fundsunavailable") ||
+        lower.includes("inability to pay") ||
+        lower.includes("storage deposit")
+    ) {
+        return (
+            <p className="hint">
+                <strong>Likely cause:</strong> //Bob has no PAS on Asset Hub Next to
+                pay contract fees. Hit the{" "}
+                <a
+                    href="https://faucet.polkadot.io/?parachain=1500"
+                    target="_blank"
+                    rel="noopener"
+                >
+                    Paseo Asset Hub Next faucet
+                </a>{" "}
+                (paste //Bob's address:{" "}
+                <code>5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty</code>) and
+                retry.
+            </p>
+        );
+    }
+
+    if (lower.includes("already registered") || lower.includes("already taken")) {
+        return (
+            <p className="hint">
+                <strong>Likely cause:</strong> someone else already registered this
+                name. Pick a different <code>.dot</code> name and retry.
+            </p>
+        );
+    }
+
+    if (lower.includes("accountunmapped") || lower.includes("mapping did not propagate")) {
+        return (
+            <p className="hint">
+                <strong>Likely cause:</strong> //Bob's SS58 → H160 mapping hasn't
+                landed yet. Wait ~30 s and retry — the map_account extrinsic needs to
+                finalise before contracts will accept calls.
+            </p>
+        );
+    }
+
+    if (lower.includes("commitment") && lower.includes("not found")) {
+        return (
+            <p className="hint">
+                <strong>Likely cause:</strong> the commitment expired between the
+                two-step register. Just retry — the commit-reveal flow restarts from
+                scratch.
+            </p>
+        );
+    }
+
+    if (lower.includes("priceofcommitmenttoolow") || lower.includes("invalidpayment")) {
+        return (
+            <p className="hint">
+                <strong>Likely cause:</strong> the price the contract demanded
+                exceeded our 10 % buffer (PoP rules may have changed mid-flight).
+                Retry — the price is re-quoted each attempt.
+            </p>
+        );
+    }
+
+    return (
+        <p className="hint">
+            Unknown failure. The dispatch-error JSON above is from pallet-revive —
+            pasting it into chat will help diagnose. Common culprits: //Bob has no
+            PAS for fees, name already taken, or the AH-Next RPC choked.
+        </p>
     );
 }
 

@@ -7,12 +7,16 @@
 
 import { createClient, type TypedApi } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
-import { paseo_bulletin } from "@parity/product-sdk-descriptors/paseo-bulletin";
-import { paseo_asset_hub } from "@parity/product-sdk-descriptors/paseo-asset-hub";
+// Locally-generated descriptors via `papi add` against the live chains.
+// The pre-published `@parity/product-sdk-descriptors` package is too stale for
+// the v2 runtime — runtime-API entry hashes mismatch, producing
+// "Incompatible runtime entry RuntimeCall(ReviveApi_call)" at dry-run time.
+// Re-generate via `npx papi generate` whenever the chain's runtime upgrades.
+import { bulletin, pah } from "@polkadot-api/descriptors";
 import { ASSET_HUB_RPC, BULLETIN_RPC } from "./constants.ts";
 
-type BulletinApi = TypedApi<typeof paseo_bulletin>;
-type AssetHubApi = TypedApi<typeof paseo_asset_hub>;
+type BulletinApi = TypedApi<typeof bulletin>;
+type AssetHubApi = TypedApi<typeof pah>;
 type Client = ReturnType<typeof createClient>;
 
 let bulletinClient: Client | null = null;
@@ -25,7 +29,7 @@ let assetHubUnsafeApi: ReturnType<Client["getUnsafeApi"]> | null = null;
 export function getBulletinClient(): { client: Client; api: BulletinApi } {
     if (!bulletinClient) {
         bulletinClient = createClient(getWsProvider(BULLETIN_RPC));
-        bulletinApi = bulletinClient.getTypedApi(paseo_bulletin);
+        bulletinApi = bulletinClient.getTypedApi(bulletin);
     }
     return { client: bulletinClient, api: bulletinApi! };
 }
@@ -37,7 +41,7 @@ export function getAssetHubClient(): {
 } {
     if (!assetHubClient) {
         assetHubClient = createClient(getWsProvider(ASSET_HUB_RPC));
-        assetHubApi = assetHubClient.getTypedApi(paseo_asset_hub);
+        assetHubApi = assetHubClient.getTypedApi(pah);
         assetHubUnsafeApi = assetHubClient.getUnsafeApi();
     }
     return { client: assetHubClient, api: assetHubApi!, unsafeApi: assetHubUnsafeApi! };
