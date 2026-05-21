@@ -1,0 +1,42 @@
+{
+  "name": "hello-playground",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@noble/hashes": "^1.4.0",
+    "@novasamatech/host-api": "0.7.8",
+    "@novasamatech/product-sdk": "0.7.8",
+    "@parity/product-sdk-address": "^0.1.1",
+    "@parity/product-sdk-crypto": "^0.1.1",
+    "@parity/product-sdk-host": "^0.2.0",
+    "@parity/product-sdk-keys": "^0.2.0",
+    "@parity/product-sdk-logger": "^0.1.1",
+    "@parity/product-sdk-signer": "^0.2.0",
+    "@parity/product-sdk-storage": "^0.1.1",
+    "@parity/product-sdk-utils": "^0.1.1",
+    "multiformats": "^13.3.1",
+    "polkadot-api": "^2.1.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "_comment_overrides": "Mirrors playground-app-template's overrides — @polkadot-api/json-rpc-provider is the standard upstream workaround.",
+  "overrides": {
+    "@novasamatech/host-api": "0.7.8",
+    "@novasamatech/product-sdk": "0.7.8",
+    "@polkadot-api/json-rpc-provider": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0"
+  }
+}
