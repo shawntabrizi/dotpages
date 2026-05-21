@@ -26,7 +26,10 @@ hello-playground/
 ## What's wired
 
 - **Editor + preview.** A form with header / subheader / accent / background / font fields, plus an "Add element" button for extra paragraphs, links, images, and dividers. The iframe preview renders `renderHtml(content)` live — **the exact bytes that would be uploaded.**
-- **Host signer.** Same pattern as `playground-app-template`: `signerManager.connect()` returns the product-account signer; `requestResourceAllocation` covers BulletInAllowance + SmartContractAllowance up-front in one consent dialog.
+- **Three signing modes via `src/account.ts`** — `ActiveAccount` is the uniform shape; sources are wired independently so toggling between them never tears down the others:
+  - `host` — Polkadot Desktop / Mobile via `@parity/product-sdk-signer` (same pattern as the template). Tried automatically on mount.
+  - `extension` — Talisman / SubWallet / Polkadot.js via `polkadot-api/pjs-signer`. Surfaced as a "Connect browser wallet" button when host is unavailable.
+  - `dev` — `//Bob` via `createDevSigner` from `@parity/product-sdk-tx`. Always wins when the checkbox is ticked, so a local dev session works with no wallet at all.
 - **CID computation.** Blake2b-256 + raw codec (`0x55`) — matches Bulletin's default per the [bulletin-storage skill](https://publicsuffix.org/list/public_suffix_list.dat) [^1]. Computed client-side from `@noble/hashes` + `multiformats`. Pressing Deploy shows the bytes, the CID, and the `.dot.li` URL you'd land at.
 - **Auto-name.** Leave the `.dot name` field blank and the deployer picks a NoStatus-shape label (matches `dot decentralize`'s rule: base ≥9 chars + exactly 2 trailing digits, so any signer without PoP can register it).
 
@@ -54,7 +57,7 @@ Open the dev server. The editor + preview should both render with the default co
 ## Conventions
 
 - React 19 + Vite + TypeScript. Plain CSS with custom-property tokens (not Tailwind — see "design system" note below).
-- **Host API only.** Like `playground-app-template`, this app expects to be opened inside Polkadot Desktop or Polkadot Mobile. The signer wrapper does not fall back to browser-extension wallets; that's intentionally out of scope.
+- **Three-way signer resolution.** Host API first, then injected extension, with `//Bob` as a one-tick override for "I just want to test the flow without setting anything up." Per the polkadot-triangle skill's host-first / standalone-fallback rule. The host signer's `signBytes` is stubbed today — chain submission will call `signerManager.signRaw(...)` directly via the source-specific path, not the bare PAPI signer.
 - HTML escaping in `template.ts::escape` covers all five XML entities. URLs in image/link blocks go through `safeUrl()` which rejects anything that isn't `http(s)`, relative, or a fragment — so a user can't smuggle a `javascript:` URL into the produced page.
 - The preview iframe uses `sandbox="allow-popups allow-popups-to-escape-sandbox"`. No `allow-scripts`, no `allow-same-origin` — the generated HTML can't reach back into the editor or call `window.parent`.
 
@@ -68,6 +71,7 @@ This project intentionally **does not** adopt the Tailwind-based `polkadot-desig
 - [ ] Wire `TransactionStorage.store` with the right Observable handling (per `bulletin-storage` skill: `.subscribe()`, `txBestBlocksState && found`, unsubscribe on both paths).
 - [ ] Wire DotNS register + setContenthash via `product-sdk-contracts`.
 - [ ] Gate "Deploy" on a confirmed `Allocated` outcome for both `BulletInAllowance` and `SmartContractAllowance`.
-- [ ] Standalone fallback (browser-extension wallet) so the app degrades gracefully outside Polkadot Desktop/Mobile.
+- [ ] Account-picker UI for the extension path — today we auto-pick the first extension's first account.
+- [ ] Resolve the host `signer` stub so chain submission can use a uniform `PolkadotSigner` across all three sources (or branch on `source` at submit time).
 - [ ] Tiptap or contenteditable for richer in-place editing if the structured-form pattern turns out to be too limiting.
 - [ ] Migrate styling to the Tailwind-based `polkadot-design-system` once a few more usage patterns settle.
