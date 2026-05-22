@@ -48,11 +48,11 @@ body {
 .site-link-url { font-size: 12px; color: var(--chrome-text2); margin-left: 8px; word-break: break-all; }
 .site-image { max-width: 100%; height: auto; border-radius: 12px; margin: 16px 0; display: block; }
 .site-image-placeholder {
-    border: 1px dashed rgba(255,255,255,0.2);
+    border: 1px dashed color-mix(in srgb, var(--site-foreground, #f5f5f5), transparent 80%);
     border-radius: 12px;
     padding: 24px;
     text-align: center;
-    color: rgba(255,255,255,0.4);
+    color: color-mix(in srgb, var(--site-foreground, #f5f5f5), transparent 60%);
     margin: 16px 0;
 }
 .image-controls { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
@@ -83,14 +83,14 @@ body {
     white-space: pre-wrap;
     word-break: break-word;
 }
-.site-divider { border: 0; border-top: 1px solid rgba(255,255,255,0.15); margin: 32px 0; }
+.site-divider { border: 0; border-top: 1px solid var(--site-divider, rgba(255,255,255,0.15)); margin: 32px 0; }
 .site-tip {
-    color: rgba(255,255,255,0.4);
+    color: color-mix(in srgb, var(--site-foreground, #f5f5f5), transparent 60%);
     font-size: 13px;
     font-style: italic;
     margin-top: 32px;
     padding: 12px 14px;
-    border: 1px dashed rgba(255,255,255,0.15);
+    border: 1px dashed var(--site-divider, rgba(255,255,255,0.15));
     border-radius: 10px;
 }
 
@@ -99,9 +99,9 @@ body {
 .block-remove {
     position: absolute;
     top: 0; right: 0;
-    background: rgba(0,0,0,0.6);
-    border: 1px solid rgba(255,255,255,0.15);
-    color: rgba(255,255,255,0.6);
+    background: color-mix(in srgb, var(--site-foreground, #f5f5f5) 14%, transparent);
+    border: 1px solid var(--site-divider, rgba(255,255,255,0.15));
+    color: color-mix(in srgb, var(--site-foreground, #f5f5f5), transparent 40%);
     width: 24px; height: 24px;
     border-radius: 999px;
     font-size: 14px;
@@ -125,14 +125,14 @@ body {
     transition: outline-color 0.15s, background-color 0.15s;
     cursor: text;
 }
-.site.is-editing .editable:hover { outline-color: rgba(255,255,255,0.2); }
+.site.is-editing .editable:hover { outline-color: color-mix(in srgb, var(--site-foreground, #f5f5f5), transparent 80%); }
 .site.is-editing .editable:focus {
     outline: 1px solid var(--accent);
     outline-offset: 4px;
 }
 .site.is-editing .editable:empty::before {
     content: attr(data-placeholder);
-    color: rgba(255,255,255,0.3);
+    color: color-mix(in srgb, var(--site-foreground, #f5f5f5), transparent 70%);
 }
 
 /* ── Floating action bar (edit view only) — sits above the bottom nav pill ─ */

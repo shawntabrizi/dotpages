@@ -43,6 +43,37 @@ const escape = (s: string): string =>
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
 
+// Pick a body text color that meets WCAG contrast against the background.
+// 0.179 is the standard sRGB relative-luminance crossover where black vs.
+// white text trade contrast dominance. If the user typed a non-hex value
+// (e.g. a CSS keyword the picker doesn't produce), default to dark-mode.
+export function isLightBackground(bg: string): boolean {
+    const m = bg.replace("#", "").match(/^[0-9a-f]{6}$/i) ? bg.replace("#", "") : null;
+    if (!m) return false;
+    const parts = m.match(/.{2}/g);
+    if (!parts) return false;
+    const [r, g, b] = parts.map((h) => parseInt(h, 16) / 255);
+    const lin = (c: number) =>
+        c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    const lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    return lum >= 0.179;
+}
+
+export interface SiteColors {
+    foreground: string;
+    divider: string;
+    colorScheme: "dark" | "light";
+}
+
+export function siteColors(background: string): SiteColors {
+    const light = isLightBackground(background);
+    return {
+        foreground: light ? "#0b0d12" : "#f5f5f5",
+        divider: light ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.15)",
+        colorScheme: light ? "light" : "dark",
+    };
+}
+
 // URL-allowlist guard so an image/link block can't smuggle a javascript: URL
 // into the produced page. http(s) and relative paths only.
 function safeUrl(raw: string): string {
@@ -73,6 +104,7 @@ export function renderHtml(content: SiteContent): string {
     const accent = escape(content.accentColor);
     const background = escape(content.background);
     const font = escape(content.fontFamily);
+    const colors = siteColors(content.background);
     const blocks = content.blocks.map(renderBlock).join("\n        ");
 
     return `<!doctype html>
@@ -82,13 +114,13 @@ export function renderHtml(content: SiteContent): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)}</title>
 <style>
-:root { color-scheme: dark; }
+:root { color-scheme: ${colors.colorScheme}; }
 * { box-sizing: border-box; }
 body {
     margin: 0;
     padding: 64px 24px;
     background: ${background};
-    color: #f5f5f5;
+    color: ${colors.foreground};
     font-family: ${font};
     line-height: 1.5;
 }
@@ -106,7 +138,7 @@ p { margin: 0 0 16px; }
 a { color: ${accent}; text-decoration: underline; text-underline-offset: 3px; }
 a:hover { opacity: 0.8; }
 img { max-width: 100%; height: auto; border-radius: 12px; margin: 16px 0; }
-hr { border: 0; border-top: 1px solid rgba(255,255,255,0.15); margin: 32px 0; }
+hr { border: 0; border-top: 1px solid ${colors.divider}; margin: 32px 0; }
 footer { margin-top: 64px; opacity: 0.4; font-size: 12px; }
 </style>
 </head>

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Editable } from "./Editable.tsx";
 import {
     DEFAULT_CONTENT,
     FONT_OPTIONS,
     renderHtml,
+    siteColors,
     type Block,
     type SiteContent,
 } from "./template.ts";
@@ -248,10 +249,14 @@ export default function App() {
     const showOwnedHint =
         useOwnedAccount && !hostAccount && !extensionAccount && !resolvingOwned;
 
+    const colors = siteColors(content.background);
     const siteStyle = {
         background: content.background,
         fontFamily: content.fontFamily,
-    } as const;
+        color: colors.foreground,
+        "--site-foreground": colors.foreground,
+        "--site-divider": colors.divider,
+    } as React.CSSProperties;
 
     return (
         <>
