@@ -23,6 +23,7 @@ import {
 } from "./account.ts";
 import { checkBulletinAuthorization, storeBytes } from "./lib/bulletin/store.ts";
 import { resizeImageToFit } from "./image-resize.ts";
+import { TEMPLATES, type Template } from "./templates.ts";
 
 type View = "edit" | "preview" | "deploy";
 type DeployResult = DeployPreview | DeploySuccess;
@@ -98,6 +99,11 @@ export default function App() {
     const [result, setResult] = useState<DeployResult | null>(null);
     const [deployError, setDeployError] = useState<string | null>(null);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
+    const [templatesMenuOpen, setTemplatesMenuOpen] = useState(false);
+    const [undoPayload, setUndoPayload] = useState<{
+        prior: SiteContent;
+        templateName: string;
+    } | null>(null);
 
     // Signer state — Bob default, owned-account opt-in.
     const [useOwnedAccount, setUseOwnedAccount] = useState(false);
@@ -159,6 +165,22 @@ export default function App() {
         setContent((prev) => ({ ...prev, blocks: [...prev.blocks, BLOCK_PRESETS[type]()] }));
         setAddMenuOpen(false);
     };
+
+    const applyTemplate = (template: Template) => {
+        setUndoPayload({ prior: content, templateName: template.name });
+        setContent(template.build());
+        setTemplatesMenuOpen(false);
+    };
+    const undoTemplate = () => {
+        if (!undoPayload) return;
+        setContent(undoPayload.prior);
+        setUndoPayload(null);
+    };
+    useEffect(() => {
+        if (!undoPayload) return;
+        const t = setTimeout(() => setUndoPayload(null), 10000);
+        return () => clearTimeout(t);
+    }, [undoPayload]);
 
     const uploadImage = async (
         file: File,
@@ -258,30 +280,67 @@ export default function App() {
         "--site-divider": colors.divider,
     } as React.CSSProperties;
 
+    const isProfile = content.layout === "profile";
+    const avatarIdx = isProfile
+        ? content.blocks.findIndex((b) => b.type === "image" && b.variant === "avatar")
+        : -1;
+    const avatarBlock = avatarIdx >= 0 ? content.blocks[avatarIdx] : null;
+    const bodyBlocks = avatarBlock
+        ? content.blocks.filter((_, i) => i !== avatarIdx)
+        : content.blocks;
+
+    const titleEditable = (
+        <Editable
+            tag="h1"
+            value={content.header}
+            onChange={(v) => update("header", v)}
+            editable={isEditing}
+            className="site-header"
+            style={{ color: content.accentColor }}
+            ariaLabel="Page header"
+            placeholder="Your page title"
+        />
+    );
+    const subheaderEditable = (
+        <Editable
+            tag="p"
+            value={content.subheader}
+            onChange={(v) => update("subheader", v)}
+            editable={isEditing}
+            className="site-subheader"
+            ariaLabel="Page subheader"
+            placeholder="A short line about you or this page"
+        />
+    );
+
     return (
         <>
             <main className={`site ${isEditing ? "is-editing" : ""}`} style={siteStyle}>
                 <article className="site-inner">
-                    <Editable
-                        tag="h1"
-                        value={content.header}
-                        onChange={(v) => update("header", v)}
-                        editable={isEditing}
-                        className="site-header"
-                        style={{ color: content.accentColor }}
-                        ariaLabel="Page header"
-                        placeholder="Your page title"
-                    />
-                    <Editable
-                        tag="p"
-                        value={content.subheader}
-                        onChange={(v) => update("subheader", v)}
-                        editable={isEditing}
-                        className="site-subheader"
-                        ariaLabel="Page subheader"
-                        placeholder="A short line about you or this page"
-                    />
-                    {content.blocks.map((block) => (
+                    {avatarBlock ? (
+                        <header className="profile-header">
+                            <BlockView
+                                key={avatarBlock.id}
+                                block={avatarBlock}
+                                accentColor={content.accentColor}
+                                editable={isEditing}
+                                onUpdate={(b) => updateBlock(avatarBlock.id, () => b)}
+                                onRemove={() => removeBlock(avatarBlock.id)}
+                                onUploadImage={uploadImage}
+                                maxStoreBytes={maxStoreBytes}
+                            />
+                            <div className="profile-header-text">
+                                {titleEditable}
+                                {subheaderEditable}
+                            </div>
+                        </header>
+                    ) : (
+                        <>
+                            {titleEditable}
+                            {subheaderEditable}
+                        </>
+                    )}
+                    {bodyBlocks.map((block) => (
                         <BlockView
                             key={block.id}
                             block={block}
@@ -302,10 +361,55 @@ export default function App() {
                 </article>
             </main>
 
+            {undoPayload && (
+                <div className="toast" role="status" aria-live="polite">
+                    <span>
+                        Applied <strong>{undoPayload.templateName}</strong>
+                    </span>
+                    <button onClick={undoTemplate}>Undo</button>
+                </div>
+            )}
+
             {/* Floating action bar — visible only in edit view; sits above the bottom nav pill. */}
             {isEditing && (
                 <div className="float-bottom">
                     <div className="action-bar" role="toolbar" aria-label="Site styling">
+                        <div className="tmpl-wrap">
+                            <button
+                                className="action-btn"
+                                onClick={() => setTemplatesMenuOpen((v) => !v)}
+                                aria-haspopup="menu"
+                                aria-expanded={templatesMenuOpen}
+                                title="Pick a starter layout"
+                            >
+                                <svg
+                                    width="14"
+                                    height="14"
+                                    viewBox="0 0 14 14"
+                                    fill="currentColor"
+                                    aria-hidden="true"
+                                >
+                                    <rect x="0" y="0" width="6" height="6" rx="1" />
+                                    <rect x="8" y="0" width="6" height="6" rx="1" />
+                                    <rect x="0" y="8" width="6" height="6" rx="1" />
+                                    <rect x="8" y="8" width="6" height="6" rx="1" />
+                                </svg>
+                            </button>
+                            {templatesMenuOpen && (
+                                <div className="tmpl-menu" role="menu">
+                                    {TEMPLATES.map((t) => (
+                                        <button
+                                            key={t.id}
+                                            onClick={() => applyTemplate(t)}
+                                            role="menuitem"
+                                        >
+                                            <span className="tmpl-name">{t.name}</span>
+                                            <span className="tmpl-desc">{t.description}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                         <ColorSwatch
                             label="Accent"
                             value={content.accentColor}
@@ -644,9 +748,22 @@ function BlockView({
     const [uploadStatus, setUploadStatus] = useState<string | null>(null);
     const [uploadError, setUploadError] = useState<string | null>(null);
     const uploading = uploadStatus !== null;
+    const handleFile = async (file: File) => {
+        if (block.type !== "image") return;
+        setUploadStatus("Reading file…");
+        setUploadError(null);
+        try {
+            const url = await onUploadImage(file, setUploadStatus);
+            onUpdate({ ...block, url, alt: block.alt || file.name });
+        } catch (cause) {
+            setUploadError(cause instanceof Error ? cause.message : String(cause));
+        } finally {
+            setUploadStatus(null);
+        }
+    };
     return (
-        <div className={`block ${editable ? "is-editing" : ""}`}>
-            {editable && (
+        <div className={`block ${editable ? "is-editing" : ""} ${block.locked ? "is-locked" : ""}`}>
+            {editable && !block.locked && (
                 <button
                     className="block-remove"
                     onClick={onRemove}
@@ -667,7 +784,7 @@ function BlockView({
                 />
             )}
             {block.type === "link" && (
-                <p className="block-link">
+                <p className={`block-link ${block.variant === "pill" ? "is-pill" : ""}`}>
                     {editable ? (
                         <>
                             <Editable
@@ -676,7 +793,14 @@ function BlockView({
                                 onChange={(label) => onUpdate({ ...block, label })}
                                 editable
                                 className="site-link"
-                                style={{ color: accentColor }}
+                                style={
+                                    block.variant === "pill"
+                                        ? {
+                                              background: accentColor,
+                                              color: siteColors(accentColor).foreground,
+                                          }
+                                        : { color: accentColor }
+                                }
                                 placeholder="Link text"
                             />
                             <Editable
@@ -694,14 +818,70 @@ function BlockView({
                             target="_blank"
                             rel="noopener"
                             className="site-link"
-                            style={{ color: accentColor }}
+                            style={
+                                block.variant === "pill"
+                                    ? {
+                                          background: accentColor,
+                                          color: siteColors(accentColor).foreground,
+                                      }
+                                    : { color: accentColor }
+                            }
                         >
                             {block.label}
                         </a>
                     )}
                 </p>
             )}
-            {block.type === "image" && (
+            {block.type === "image" && block.variant === "avatar" && editable && (
+                <>
+                    <label className="avatar-upload" title="Change avatar">
+                        <input
+                            type="file"
+                            accept="image/*"
+                            disabled={uploading}
+                            onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                e.target.value = "";
+                                if (file) await handleFile(file);
+                            }}
+                        />
+                        {block.url && block.url !== "https://" ? (
+                            <img
+                                className="site-image is-avatar"
+                                src={block.url}
+                                alt={block.alt}
+                            />
+                        ) : (
+                            <div className="site-image-placeholder is-avatar">
+                                {uploading ? "Uploading…" : "Click to upload"}
+                            </div>
+                        )}
+                        {!uploading && block.url && block.url !== "https://" && (
+                            <span className="avatar-overlay" aria-hidden="true">
+                                Change
+                            </span>
+                        )}
+                    </label>
+                    {(uploading || uploadError) && (
+                        <div className="avatar-status">
+                            {uploading && uploadStatus && (
+                                <StepProgress
+                                    steps={UPLOAD_STEPS}
+                                    step={stepForUploadStatus(uploadStatus)}
+                                    status={uploadStatus}
+                                />
+                            )}
+                            {uploadError && (
+                                <pre className="image-upload-error">{uploadError}</pre>
+                            )}
+                        </div>
+                    )}
+                </>
+            )}
+            {block.type === "image" && block.variant === "avatar" && !editable && block.url && block.url !== "https://" && (
+                <img className="site-image is-avatar" src={block.url} alt={block.alt} />
+            )}
+            {block.type === "image" && block.variant !== "avatar" && (
                 <>
                     {block.url && block.url !== "https://" ? (
                         <img className="site-image" src={block.url} alt={block.alt} />
@@ -718,28 +898,7 @@ function BlockView({
                                     onChange={async (e) => {
                                         const file = e.target.files?.[0];
                                         e.target.value = "";
-                                        if (!file) return;
-                                        setUploadStatus("Reading file…");
-                                        setUploadError(null);
-                                        try {
-                                            const url = await onUploadImage(
-                                                file,
-                                                setUploadStatus,
-                                            );
-                                            onUpdate({
-                                                ...block,
-                                                url,
-                                                alt: block.alt || file.name,
-                                            });
-                                        } catch (cause) {
-                                            setUploadError(
-                                                cause instanceof Error
-                                                    ? cause.message
-                                                    : String(cause),
-                                            );
-                                        } finally {
-                                            setUploadStatus(null);
-                                        }
+                                        if (file) await handleFile(file);
                                     }}
                                 />
                                 <span>

@@ -3,11 +3,30 @@
 // the result is a single byte blob we can hash and store in one
 // TransactionStorage.store call.
 
+export type ImageVariant = "default" | "avatar";
+export type LinkVariant = "default" | "pill";
+
 export type Block =
-    | { id: string; type: "paragraph"; text: string }
-    | { id: string; type: "link"; label: string; url: string }
-    | { id: string; type: "image"; url: string; alt: string }
-    | { id: string; type: "divider" };
+    | { id: string; type: "paragraph"; text: string; locked?: boolean }
+    | {
+          id: string;
+          type: "link";
+          label: string;
+          url: string;
+          variant?: LinkVariant;
+          locked?: boolean;
+      }
+    | {
+          id: string;
+          type: "image";
+          url: string;
+          alt: string;
+          variant?: ImageVariant;
+          locked?: boolean;
+      }
+    | { id: string; type: "divider"; locked?: boolean };
+
+export type Layout = "default" | "profile";
 
 export interface SiteContent {
     header: string;
@@ -15,6 +34,7 @@ export interface SiteContent {
     accentColor: string;
     background: string;
     fontFamily: string;
+    layout?: Layout;
     blocks: Block[];
 }
 
@@ -88,12 +108,14 @@ function renderBlock(block: Block): string {
     switch (block.type) {
         case "paragraph":
             return `<p>${escape(block.text)}</p>`;
-        case "link":
-            return `<p><a href="${safeUrl(block.url)}" target="_blank" rel="noopener">${escape(
-                block.label,
-            )}</a></p>`;
-        case "image":
-            return `<img src="${safeUrl(block.url)}" alt="${escape(block.alt)}">`;
+        case "link": {
+            const wrap = block.variant === "pill" ? ' class="pill"' : "";
+            return `<p${wrap}><a href="${safeUrl(block.url)}" target="_blank" rel="noopener">${escape(block.label)}</a></p>`;
+        }
+        case "image": {
+            const cls = block.variant === "avatar" ? ' class="avatar"' : "";
+            return `<img${cls} src="${safeUrl(block.url)}" alt="${escape(block.alt)}">`;
+        }
         case "divider":
             return `<hr>`;
     }
@@ -105,7 +127,31 @@ export function renderHtml(content: SiteContent): string {
     const background = escape(content.background);
     const font = escape(content.fontFamily);
     const colors = siteColors(content.background);
-    const blocks = content.blocks.map(renderBlock).join("\n        ");
+    const accentContrast = siteColors(content.accentColor).foreground;
+
+    // Profile layout: lift the first avatar block out of the body and put it
+    // beside the header/subheader in a two-column row. Falls back to default
+    // single-column flow if no avatar block is found.
+    const isProfile = content.layout === "profile";
+    const avatarIdx = isProfile
+        ? content.blocks.findIndex((b) => b.type === "image" && b.variant === "avatar")
+        : -1;
+    const avatarBlock = avatarIdx >= 0 ? content.blocks[avatarIdx] : null;
+    const bodyBlocks = avatarBlock
+        ? content.blocks.filter((_, i) => i !== avatarIdx)
+        : content.blocks;
+    const blocks = bodyBlocks.map(renderBlock).join("\n        ");
+
+    const headerHtml = avatarBlock
+        ? `<header class="profile-header">
+        ${renderBlock(avatarBlock)}
+        <div class="profile-header-text">
+            <h1>${escape(content.header)}</h1>
+            <p class="subheader">${escape(content.subheader)}</p>
+        </div>
+    </header>`
+        : `<h1>${escape(content.header)}</h1>
+    <p class="subheader">${escape(content.subheader)}</p>`;
 
     return `<!doctype html>
 <html lang="en">
@@ -138,14 +184,45 @@ p { margin: 0 0 16px; }
 a { color: ${accent}; text-decoration: underline; text-underline-offset: 3px; }
 a:hover { opacity: 0.8; }
 img { max-width: 100%; height: auto; border-radius: 12px; margin: 16px 0; }
+img.avatar {
+    width: 160px; height: 160px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin: 24px auto;
+    display: block;
+}
+p.pill { text-align: center; margin: 20px 0; }
+p.pill a {
+    display: inline-block;
+    min-width: 200px;
+    padding: 14px 24px;
+    background: ${accent};
+    color: ${accentContrast};
+    border-radius: 12px;
+    text-decoration: none;
+    font-weight: 600;
+}
 hr { border: 0; border-top: 1px solid ${colors.divider}; margin: 32px 0; }
 footer { margin-top: 64px; opacity: 0.4; font-size: 12px; }
+.profile-header {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    margin: 0 0 32px;
+}
+.profile-header img.avatar { margin: 0; flex-shrink: 0; }
+.profile-header-text { flex: 1; min-width: 0; }
+.profile-header-text h1 { margin: 0 0 8px; }
+.profile-header-text .subheader { margin: 0; }
+@media (max-width: 480px) {
+    .profile-header { flex-direction: column; text-align: center; gap: 16px; }
+    .profile-header img.avatar { margin: 0 auto; }
+}
 </style>
 </head>
 <body>
 <main>
-    <h1>${escape(content.header)}</h1>
-    <p class="subheader">${escape(content.subheader)}</p>
+    ${headerHtml}
     ${blocks}
     <footer>made with <a href="https://github.com/shawntabrizi/hello-playground" target="_blank" rel="noopener">hello-playground</a></footer>
 </main>
