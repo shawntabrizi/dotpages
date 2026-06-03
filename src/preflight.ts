@@ -112,7 +112,8 @@ export async function runPreflight(params: {
         link: null,
     };
 
-    // ── bulletin: on-chain authorization vs payload size ─────────────────
+    // ── bulletin: a non-expired authorization is the actual store gate;
+    //    the byte allowance is a soft priority signal (warn, never fail) ──
     const bulletinCheck = async (): Promise<PreflightCheck> => {
         const auth = await checkBulletinAuthorization(account.address);
         if (!auth.authorized) {
@@ -120,16 +121,19 @@ export async function runPreflight(params: {
                 id: "bulletin",
                 label: "Bulletin storage",
                 state: "fail",
-                detail: `${account.displayName} has no Bulletin storage authorization`,
+                detail: auth.expired
+                    ? `Authorization expired at block #${auth.expiresAt?.toLocaleString()} — re-up at the faucet`
+                    : `${account.displayName} has no Bulletin storage authorization`,
                 link: BULLETIN_FAUCET_URL,
             };
         }
-        if (auth.bytes < BigInt(bytes.length)) {
+        const remaining = auth.bytesAllowance - auth.bytesUsed;
+        if (remaining < BigInt(bytes.length)) {
             return {
                 id: "bulletin",
                 label: "Bulletin storage",
-                state: "fail",
-                detail: `Authorized for ${auth.bytes.toLocaleString()} B but the site is ${bytes.length.toLocaleString()} B`,
+                state: "warn",
+                detail: `${(remaining > 0n ? remaining : 0n).toLocaleString()} B of ${auth.bytesAllowance.toLocaleString()} B allowance left — store still works, but at degraded priority`,
                 link: BULLETIN_FAUCET_URL,
             };
         }
@@ -137,7 +141,7 @@ export async function runPreflight(params: {
             id: "bulletin",
             label: "Bulletin storage",
             state: "ok",
-            detail: `${auth.bytes.toLocaleString()} B authorized`,
+            detail: `${remaining.toLocaleString()} B of ${auth.bytesAllowance.toLocaleString()} B allowance remaining`,
             link: null,
         };
     };
@@ -162,15 +166,20 @@ export async function runPreflight(params: {
         const ownerEvm = await getEvmAddress(account.address);
         const quote = await quoteDomain(label, ownerEvm, account.address);
         if (quote.price !== null) priceNative = quote.price / NATIVE_TO_ETH_RATIO;
-        if (quote.message) {
-            // The PoP-rules contract had something to say about this
-            // label+owner. We don't decode the status enums client-side —
-            // surface the contract's own message and let the user judge.
+        const priceText = priceNative !== null ? ` · price ${formatPas(priceNative)}` : "";
+        // The message is a classification, present even on success
+        // ("Available to all"). The actual verdict is the tier comparison:
+        // the account can register iff userStatus >= status.
+        if (
+            quote.status !== null &&
+            quote.userStatus !== null &&
+            quote.userStatus < quote.status
+        ) {
             return {
                 id: "name",
                 label: ".dot name",
                 state: "warn",
-                detail: `Available, but PoP rules note: ${quote.message}`,
+                detail: `Available, but "${quote.message ?? "restricted"}" — this account's verification tier (${quote.userStatus}) is below the name's requirement (${quote.status})${priceText}`,
                 link: null,
             };
         }
@@ -178,10 +187,7 @@ export async function runPreflight(params: {
             id: "name",
             label: ".dot name",
             state: "ok",
-            detail:
-                priceNative !== null
-                    ? `${label}.dot is available · price ${formatPas(priceNative)}`
-                    : `${label}.dot is available`,
+            detail: `${label}.dot is available${priceText}`,
             link: null,
         };
     };

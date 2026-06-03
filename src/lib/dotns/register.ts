@@ -41,7 +41,13 @@ export async function checkDomainAvailability(
 export interface DomainQuote {
     /** Price in Wei (18 decimals). Null when neither price probe succeeded. */
     price: bigint | null;
-    /** PoP-rules message for this label+owner (e.g. why it can't register). */
+    /** The name's requirement tier (0 = available to all; probed empirically:
+     *  1 = Lite personhood, 3 = governance-reserved). Null on fallback path. */
+    status: number | null;
+    /** The caller's verification tier — registrable when userStatus >= status. */
+    userStatus: number | null;
+    /** PoP-rules classification message (present even on success,
+     *  e.g. "Available to all"). */
     message: string | null;
 }
 
@@ -70,13 +76,13 @@ export async function quoteDomain(
             callerAddress,
             fallback,
         );
-        if (!fbResult.success) return { price: null, message: null };
+        if (!fbResult.success) return { price: null, status: null, userStatus: null, message: null };
         const price = decodeFunctionResult({
             abi: POP_RULES_ABI,
             functionName: "price",
             data: fbResult.returnData,
         });
-        return { price, message: null };
+        return { price, status: null, userStatus: null, message: null };
     }
 
     const metadata = decodeFunctionResult({
@@ -84,7 +90,12 @@ export async function quoteDomain(
         functionName: "priceWithoutCheck",
         data: result.returnData,
     }) as { price: bigint; status: number; userStatus: number; message: string };
-    return { price: metadata.price, message: metadata.message || null };
+    return {
+        price: metadata.price,
+        status: metadata.status,
+        userStatus: metadata.userStatus,
+        message: metadata.message || null,
+    };
 }
 
 async function getDomainPrice(

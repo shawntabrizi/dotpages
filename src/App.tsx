@@ -258,7 +258,10 @@ export default function App() {
         checkBulletinAuthorization(address)
             .then((auth) => {
                 if (cancelled) return;
-                setMaxStoreBytes(auth.authorized ? Number(auth.bytes) : 0);
+                const remaining = auth.bytesAllowance - auth.bytesUsed;
+                setMaxStoreBytes(
+                    auth.authorized ? Number(remaining > 0n ? remaining : 0n) : 0,
+                );
             })
             .catch(() => {
                 if (!cancelled) setMaxStoreBytes(null);
@@ -275,6 +278,11 @@ export default function App() {
     const [autoLabel, setAutoLabel] = useState<string | null>(null);
     const [preflight, setPreflight] = useState<PreflightReport | null>(null);
     const [preflightBusy, setPreflightBusy] = useState(false);
+    // Failed checks don't hard-block Deploy — the first click arms an
+    // "are you sure" confirmation, the second deploys anyway. The chain is
+    // the real authority; the checklist is advice.
+    const [confirmArmed, setConfirmArmed] = useState(false);
+    const [copiedAddress, setCopiedAddress] = useState(false);
     const effectiveLabel = domain.trim().replace(/\.dot$/i, "") || autoLabel || "";
 
     // Intentionally narrow deps: derive once, on the first visit to the
@@ -298,6 +306,7 @@ export default function App() {
         let cancelled = false;
         setPreflightBusy(true);
         setResult(null); // inputs changed — a previous deploy result is stale
+        setConfirmArmed(false); // …and so is an armed "deploy anyway"
         const t = setTimeout(() => {
             runPreflight({
                 html: currentHtml(),
@@ -619,10 +628,29 @@ export default function App() {
         isEditing && mode === "blocks"
             ? content.blocks.find((b) => b.id === editingBlockId) ?? null
             : null;
-    // Deploy is gated on the pre-flight checklist: every blocking check must
-    // pass ("warn" entries don't block — see preflight.ts severity model).
-    const canDeploy =
-        !busy && activeAccount !== null && !preflightBusy && preflight?.ok === true;
+    // Only hard requirements disable Deploy (a signer and a name). Failed
+    // checks instead arm a confirm step — see onDeployClick.
+    const canDeploy = !busy && activeAccount !== null && effectiveLabel !== "";
+    const checksClean = preflight !== null && preflight.ok && !preflightBusy;
+    const onDeployClick = () => {
+        if (!checksClean && !confirmArmed) {
+            setConfirmArmed(true);
+            return;
+        }
+        setConfirmArmed(false);
+        void deploy();
+    };
+    const copyAddress = async () => {
+        if (!activeAccount) return;
+        try {
+            await navigator.clipboard.writeText(activeAccount.address);
+            setCopiedAddress(true);
+            setTimeout(() => setCopiedAddress(false), 1500);
+        } catch {
+            // Clipboard unavailable (permissions/insecure context) — the
+            // address is still selectable text.
+        }
+    };
     const showOwnedHint =
         !useDevAccount && !hostAccount && !extensionAccount && !resolvingOwned;
 
@@ -1024,6 +1052,19 @@ export default function App() {
                                   ? "connecting…"
                                   : "no signer"}
                         </span>
+                        {activeAccount && (
+                            <button
+                                type="button"
+                                className="account-address"
+                                onClick={copyAddress}
+                                title="Copy address"
+                            >
+                                <code>{activeAccount.address}</code>
+                                <span className="copy-state">
+                                    {copiedAddress ? "copied ✓" : "copy"}
+                                </span>
+                            </button>
+                        )}
                         {!useDevAccount && !hostAccount && !extensionAccount && (
                             <button
                                 className="pill pill-secondary"
@@ -1123,12 +1164,25 @@ export default function App() {
                     )}
 
                     <button
-                        className="pill pill-primary pill-wide"
-                        onClick={deploy}
+                        className={`pill pill-primary pill-wide${confirmArmed ? " pill-confirm" : ""}`}
+                        onClick={onDeployClick}
                         disabled={!canDeploy}
                     >
-                        {busy ? "Deploying…" : preflightBusy ? "Checking…" : "Deploy"}
+                        {busy
+                            ? "Deploying…"
+                            : confirmArmed
+                              ? "Deploy anyway?"
+                              : preflightBusy
+                                ? "Checking…"
+                                : "Deploy"}
                     </button>
+                    {confirmArmed && !busy && (
+                        <p className="hint">
+                            {preflightBusy
+                                ? "Checks are still running — tap again to deploy without waiting."
+                                : "Some checks didn't pass — the deploy may fail or waste a transaction. Tap again to proceed."}
+                        </p>
+                    )}
 
                     {busy && status && deployStep !== null && (
                         <StepProgress

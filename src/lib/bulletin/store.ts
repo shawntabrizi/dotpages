@@ -1,6 +1,12 @@
 // Bulletin storage flow: check authorization → TransactionStorage.store →
 // wait for inclusion. Authorization check is REQUIRED — unauthorized store
 // transactions fail silently on Bulletin Chain (no on-chain error event).
+//
+// AuthorizationExtent semantics (v2 runtime, per the pallet's types.rs):
+// `transactions`/`bytes` count CONSUMPTION within the current window and
+// never gate; `*_allowance` are the caps set at grant time. What gates a
+// `store` call is a non-expired authorization existing at all — the soft
+// byte counters only feed transaction priority.
 
 import { Enum, type PolkadotSigner } from "polkadot-api";
 import { getBulletinClient } from "../polkadot/clients.ts";
@@ -20,22 +26,45 @@ export interface StoreHTMLResult {
     bytes: number;
 }
 
-interface AuthCheck {
+export interface AuthCheck {
+    /** Entry exists and hasn't expired — the actual gate for `store`. */
     authorized: boolean;
-    transactions: number;
-    bytes: bigint;
+    /** True when an entry exists but its window has lapsed. */
+    expired: boolean;
+    expiresAt: number | null;
+    /** Soft-side consumption (store + renew) — priority signal, never gates. */
+    bytesUsed: bigint;
+    bytesAllowance: bigint;
+    transactionsUsed: number;
+    transactionsAllowance: number;
 }
+
+const NO_AUTH: AuthCheck = {
+    authorized: false,
+    expired: false,
+    expiresAt: null,
+    bytesUsed: 0n,
+    bytesAllowance: 0n,
+    transactionsUsed: 0,
+    transactionsAllowance: 0,
+};
 
 export async function checkBulletinAuthorization(address: string): Promise<AuthCheck> {
     const { api } = getBulletinClient();
-    const auth = await api.query.TransactionStorage.Authorizations.getValue(
-        Enum("Account", address),
-    );
-    if (!auth) return { authorized: false, transactions: 0, bytes: 0n };
+    const [auth, now] = await Promise.all([
+        api.query.TransactionStorage.Authorizations.getValue(Enum("Account", address)),
+        api.query.System.Number.getValue(),
+    ]);
+    if (!auth) return NO_AUTH;
+    const expired = auth.expiration <= now;
     return {
-        authorized: auth.extent.transactions > 0 && auth.extent.bytes > 0n,
-        transactions: auth.extent.transactions,
-        bytes: auth.extent.bytes,
+        authorized: !expired,
+        expired,
+        expiresAt: auth.expiration,
+        bytesUsed: auth.extent.bytes + auth.extent.bytes_permanent,
+        bytesAllowance: auth.extent.bytes_allowance,
+        transactionsUsed: auth.extent.transactions,
+        transactionsAllowance: auth.extent.transactions_allowance,
     };
 }
 
@@ -59,15 +88,16 @@ export async function storeBytes(params: {
     const auth = await checkBulletinAuthorization(signerAddress);
     if (!auth.authorized) {
         throw new Error(
-            `No Bulletin authorization for ${displayName} (${signerAddress}).\n\n` +
-                `Self-serve faucet:\n${BULLETIN_FAUCET_URL}`,
+            auth.expired
+                ? `Bulletin authorization for ${displayName} expired at block #${auth.expiresAt?.toLocaleString()}.\n\n` +
+                  `Re-up at the self-serve faucet:\n${BULLETIN_FAUCET_URL}`
+                : `No Bulletin authorization for ${displayName} (${signerAddress}).\n\n` +
+                  `Self-serve faucet:\n${BULLETIN_FAUCET_URL}`,
         );
     }
-    if (auth.bytes < BigInt(bytes.length)) {
-        throw new Error(
-            `${displayName} is authorized for ${auth.bytes} bytes but ${label.toLowerCase()} is ${bytes.length} bytes`,
-        );
-    }
+    // No byte-budget throw here: the soft-side counters never gate a store
+    // call (per the pallet docs) — consumption past the allowance only
+    // degrades priority. The pre-flight checklist surfaces that as a warn.
 
     const cid = computeCID(bytes).toString();
     const { api } = getBulletinClient();

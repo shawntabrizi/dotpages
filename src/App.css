@@ -887,6 +887,39 @@ body {
     .progress-segment.is-active { animation: none; }
 }
 
+/* Copyable account address — the exact string to paste into faucets. */
+.account-address {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 10px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--chrome-border);
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    color: inherit;
+}
+.account-address code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    color: var(--chrome-text);
+    word-break: break-all;
+}
+.account-address .copy-state {
+    flex: 0 0 auto;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+}
+
+/* Armed "deploy anyway" confirmation state. */
+.pill-confirm {
+    background: var(--danger);
+    border-color: var(--danger);
+}
+
 /* Pre-flight checklist — read-only readiness checks above the Deploy button. */
 .preflight {
     display: flex;
