@@ -412,6 +412,16 @@ export default function App() {
             {mode !== "blocks" &&
                 (isEditing ? (
                     <main className="code-pane">
+                        <div className="code-card">
+                            <div className="code-card-header" aria-hidden="true">
+                                {mode === "markdown"
+                                    ? "README.md"
+                                    : htmlPane === "css"
+                                      ? "styles.css"
+                                      : htmlPane === "js"
+                                        ? "script.js"
+                                        : "index.html"}
+                            </div>
                         <textarea
                             className="code-editor"
                             value={
@@ -445,6 +455,7 @@ export default function App() {
                                     : `${htmlPane.toUpperCase()} source`
                             }
                         />
+                        </div>
                     </main>
                 ) : (
                     // Preview IS the deploy artifact. sandbox without

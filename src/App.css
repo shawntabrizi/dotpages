@@ -847,11 +847,30 @@ body {
     padding: 24px 16px calc(180px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px));
     display: flex;
 }
-.code-editor {
+.code-card {
     flex: 1;
+    display: flex;
+    flex-direction: column;
     width: 100%;
     max-width: 840px;
     margin: 0 auto;
+    background: var(--chrome-surface);
+    border: 1px solid var(--chrome-border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+.code-card-header {
+    padding: 8px 14px;
+    background: rgba(0,0,0,0.25);
+    border-bottom: 1px solid var(--chrome-border);
+    color: var(--chrome-text2);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+}
+.code-editor {
+    flex: 1;
+    width: 100%;
+    padding: 14px;
     background: transparent;
     border: 0;
     outline: none;
@@ -861,6 +880,9 @@ body {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 13px;
     line-height: 1.6;
+    /* Soft wrap is the textarea default; `anywhere` additionally breaks long
+       unbroken strings (data/ipfs URLs) instead of forcing horizontal panning. */
+    overflow-wrap: anywhere;
 }
 
 .site-frame {
