@@ -1471,7 +1471,11 @@ function BlockEditSheet({
 }) {
     const [uploadStatus, setUploadStatus] = useState<string | null>(null);
     const [uploadError, setUploadError] = useState<string | null>(null);
+    // URL entry is the power-user path — hidden behind a toggle by default.
+    const [showUrlField, setShowUrlField] = useState(false);
     const uploading = uploadStatus !== null;
+    const hasImage =
+        block.type === "image" && !!block.url && block.url !== "https://";
     const handleFile = async (file: File) => {
         if (block.type !== "image") return;
         setUploadStatus("Reading file…");
@@ -1529,7 +1533,9 @@ function BlockEditSheet({
                 )}
                 {block.type === "image" && (
                     <>
-                        <label className="image-upload sheet-upload">
+                        <label
+                            className={`sheet-media ${hasImage ? "has-img" : ""}`}
+                        >
                             <input
                                 type="file"
                                 accept="image/*"
@@ -1540,34 +1546,65 @@ function BlockEditSheet({
                                     if (file) await handleFile(file);
                                 }}
                             />
-                            <span>{uploading ? "Uploading…" : "Upload image"}</span>
+                            {uploading && uploadStatus ? (
+                                <div className="sheet-media-empty">
+                                    <StepProgress
+                                        steps={UPLOAD_STEPS}
+                                        step={stepForUploadStatus(uploadStatus)}
+                                        status={uploadStatus}
+                                    />
+                                </div>
+                            ) : hasImage ? (
+                                <>
+                                    <img src={block.url} alt={block.alt} />
+                                    <span
+                                        className="sheet-media-chip"
+                                        aria-hidden="true"
+                                    >
+                                        Replace
+                                    </span>
+                                </>
+                            ) : (
+                                <div className="sheet-media-empty">
+                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                        <path d="M12 16V4" />
+                                        <path d="m6 10 6-6 6 6" />
+                                        <path d="M4 20h16" />
+                                    </svg>
+                                    <span>Tap to add an image</span>
+                                    <span className="sheet-media-note">
+                                        Optimized automatically — up to{" "}
+                                        {MAX_IMAGE_DIMENSION}px,{" "}
+                                        {(maxStoreBytes / 1024 / 1024).toFixed(0)} MB
+                                    </span>
+                                </div>
+                            )}
                         </label>
-                        <p className="sheet-hint">
-                            Uploads are optimized for the page: resized to ≤
-                            {MAX_IMAGE_DIMENSION}px and compressed (max{" "}
-                            {(maxStoreBytes / 1024 / 1024).toFixed(0)} MB).
-                        </p>
-                        {uploading && uploadStatus && (
-                            <StepProgress
-                                steps={UPLOAD_STEPS}
-                                step={stepForUploadStatus(uploadStatus)}
-                                status={uploadStatus}
-                            />
-                        )}
                         {uploadError && (
                             <pre className="image-upload-error">{uploadError}</pre>
                         )}
-                        <label className="sheet-field">
-                            <span>Image URL</span>
-                            <input
-                                type="url"
-                                value={block.url}
-                                onChange={(e) =>
-                                    onUpdate({ ...block, url: e.target.value })
-                                }
-                                placeholder="https:// or upload above"
-                            />
-                        </label>
+                        {showUrlField ? (
+                            <label className="sheet-field">
+                                <span>Image link</span>
+                                <input
+                                    type="url"
+                                    value={block.url}
+                                    onChange={(e) =>
+                                        onUpdate({ ...block, url: e.target.value })
+                                    }
+                                    placeholder="https://"
+                                    autoFocus
+                                />
+                            </label>
+                        ) : (
+                            <button
+                                type="button"
+                                className="sheet-link-toggle"
+                                onClick={() => setShowUrlField(true)}
+                            >
+                                Use an image link instead
+                            </button>
+                        )}
                         <label className="sheet-field">
                             <span>Alt text</span>
                             <input
