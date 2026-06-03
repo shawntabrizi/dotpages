@@ -195,6 +195,8 @@ export default function App() {
     const [result, setResult] = useState<DeployResult | null>(null);
     const [deployError, setDeployError] = useState<string | null>(null);
     const [openMenu, setOpenMenu] = useState<ActionMenu | null>(null);
+    // Which structured block (link/button/image) has its bottom sheet open.
+    const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
     const toggleMenu = (menu: ActionMenu) =>
         setOpenMenu((prev) => (prev === menu ? null : menu));
 
@@ -515,6 +517,10 @@ export default function App() {
     };
 
     const isEditing = view === "edit";
+    const editingBlock =
+        isEditing && mode === "blocks"
+            ? content.blocks.find((b) => b.id === editingBlockId) ?? null
+            : null;
     const canDeploy = !busy && activeAccount !== null;
     const showOwnedHint =
         useOwnedAccount && !hostAccount && !extensionAccount && !resolvingOwned;
@@ -608,8 +614,7 @@ export default function App() {
                             editable={isEditing}
                             onUpdate={(b) => updateBlock(block.id, () => b)}
                             onRemove={() => removeBlock(block.id)}
-                            onUploadImage={uploadImage}
-                            maxStoreBytes={maxStoreBytes}
+                            onEdit={() => setEditingBlockId(block.id)}
                         />
                     ))}
                     {isEditing && content.blocks.length === 0 && (
@@ -882,6 +887,20 @@ export default function App() {
                         <RedoIcon />
                     </button>
                 </div>
+            )}
+
+            {editingBlock && (
+                <BlockEditSheet
+                    block={editingBlock}
+                    onUpdate={(b) => updateBlock(editingBlock.id, () => b)}
+                    onDelete={() => {
+                        removeBlock(editingBlock.id);
+                        setEditingBlockId(null);
+                    }}
+                    onClose={() => setEditingBlockId(null)}
+                    onUploadImage={uploadImage}
+                    maxStoreBytes={maxStoreBytes}
+                />
             )}
 
             {/* Deploy panel — visible only in deploy view. */}
@@ -1307,44 +1326,49 @@ function StyleRow({
     );
 }
 
+// In edit mode, text blocks stay directly editable inline (the WYSIWYG core);
+// structured blocks (link/button/image) render exactly like the preview and
+// open the bottom-sheet property editor on tap.
 function BlockView({
     block,
     accentColor,
     editable,
     onUpdate,
     onRemove,
-    onUploadImage,
-    maxStoreBytes,
+    onEdit,
 }: {
     block: Block;
     accentColor: string;
     editable: boolean;
     onUpdate: (next: Block) => void;
     onRemove: () => void;
-    onUploadImage: (file: File, onStatus: (msg: string) => void) => Promise<string>;
-    maxStoreBytes: number | null;
+    onEdit: () => void;
 }) {
-    const [uploadStatus, setUploadStatus] = useState<string | null>(null);
-    const [uploadError, setUploadError] = useState<string | null>(null);
-    const uploading = uploadStatus !== null;
-    const handleFile = async (file: File) => {
-        if (block.type !== "image") return;
-        setUploadStatus("Reading file…");
-        setUploadError(null);
-        try {
-            const url = await onUploadImage(file, setUploadStatus);
-            onUpdate({ ...block, url, alt: block.alt || file.name });
-        } catch (cause) {
-            setUploadError(cause instanceof Error ? cause.message : String(cause));
-        } finally {
-            setUploadStatus(null);
-        }
-    };
+    const linkStyle =
+        block.type === "link" && block.variant === "pill"
+            ? {
+                  background: accentColor,
+                  color: siteColors(accentColor).foreground,
+              }
+            : { color: accentColor };
+    const structured = block.type === "link" || block.type === "image";
     return (
         <div className={`block ${editable ? "is-editing" : ""}`}>
+            {editable && structured && (
+                <button
+                    className="block-corner block-edit"
+                    onClick={onEdit}
+                    aria-label={`Edit ${block.type}`}
+                    title="Edit"
+                >
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4z" />
+                    </svg>
+                </button>
+            )}
             {editable && (
                 <button
-                    className="block-remove"
+                    className="block-corner block-remove"
                     onClick={onRemove}
                     aria-label={`Remove ${block.type}`}
                     title="Remove"
@@ -1376,106 +1400,184 @@ function BlockView({
             {block.type === "link" && (
                 <p className={`block-link ${block.variant === "pill" ? "is-pill" : ""}`}>
                     {editable ? (
-                        <>
-                            <Editable
-                                tag="span"
-                                value={block.label}
-                                onChange={(label) => onUpdate({ ...block, label })}
-                                editable
-                                className="site-link"
-                                style={
-                                    block.variant === "pill"
-                                        ? {
-                                              background: accentColor,
-                                              color: siteColors(accentColor).foreground,
-                                          }
-                                        : { color: accentColor }
-                                }
-                                placeholder="Link text"
-                            />
-                            <Editable
-                                tag="span"
-                                value={block.url}
-                                onChange={(url) => onUpdate({ ...block, url })}
-                                editable
-                                className="site-link-url"
-                                placeholder="https://"
-                            />
-                        </>
+                        <span
+                            className="site-link block-tap"
+                            style={linkStyle}
+                            onClick={onEdit}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && onEdit()}
+                        >
+                            {block.label || "Link text"}
+                        </span>
                     ) : (
                         <a
                             href={block.url}
                             target="_blank"
                             rel="noopener"
                             className="site-link"
-                            style={
-                                block.variant === "pill"
-                                    ? {
-                                          background: accentColor,
-                                          color: siteColors(accentColor).foreground,
-                                      }
-                                    : { color: accentColor }
-                            }
+                            style={linkStyle}
                         >
                             {block.label}
                         </a>
                     )}
                 </p>
             )}
-            {block.type === "image" && (
-                <>
-                    {block.url && block.url !== "https://" ? (
-                        <img
-                            className={`site-image is-${imageSize(block.variant)}`}
-                            src={block.url}
-                            alt={block.alt}
-                        />
-                    ) : editable ? (
-                        <div
-                            className={`site-image-placeholder is-${imageSize(block.variant)}`}
-                        >
-                            No image yet — upload below
-                        </div>
-                    ) : null}
-                    {editable && (
-                        <div className="image-controls">
-                            <label className="image-upload">
-                                <input
-                                    type="file"
-                                    accept="image/*"
-                                    disabled={uploading}
-                                    onChange={async (e) => {
-                                        const file = e.target.files?.[0];
-                                        e.target.value = "";
-                                        if (file) await handleFile(file);
-                                    }}
-                                />
-                                <span>
-                                    {uploading
-                                        ? "Uploading…"
-                                        : maxStoreBytes !== null && maxStoreBytes > 0
-                                          ? `Upload image (auto-resize → ≤${Math.floor(maxStoreBytes / 1024)} KB)`
-                                          : "Upload image"}
-                                </span>
-                            </label>
-                            {uploading && uploadStatus && (
-                                <StepProgress
-                                    steps={UPLOAD_STEPS}
-                                    step={stepForUploadStatus(uploadStatus)}
-                                    status={uploadStatus}
-                                />
-                            )}
-                            <Editable
-                                tag="span"
+            {block.type === "image" &&
+                (block.url && block.url !== "https://" ? (
+                    <img
+                        className={`site-image is-${imageSize(block.variant)} ${editable ? "block-tap" : ""}`}
+                        src={block.url}
+                        alt={block.alt}
+                        onClick={editable ? onEdit : undefined}
+                    />
+                ) : editable ? (
+                    <div
+                        className={`site-image-placeholder is-${imageSize(block.variant)} block-tap`}
+                        onClick={onEdit}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => e.key === "Enter" && onEdit()}
+                    >
+                        No image yet — tap to edit
+                    </div>
+                ) : null)}
+            {block.type === "divider" && <hr className="site-divider" />}
+        </div>
+    );
+}
+
+// Bottom-sheet property editor for structured blocks. Labeled form fields,
+// live updates (the page behind reflects edits as you type), Delete as the
+// destructive footer action.
+function BlockEditSheet({
+    block,
+    onUpdate,
+    onDelete,
+    onClose,
+    onUploadImage,
+    maxStoreBytes,
+}: {
+    block: Block;
+    onUpdate: (next: Block) => void;
+    onDelete: () => void;
+    onClose: () => void;
+    onUploadImage: (file: File, onStatus: (msg: string) => void) => Promise<string>;
+    maxStoreBytes: number | null;
+}) {
+    const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+    const [uploadError, setUploadError] = useState<string | null>(null);
+    const uploading = uploadStatus !== null;
+    const handleFile = async (file: File) => {
+        if (block.type !== "image") return;
+        setUploadStatus("Reading file…");
+        setUploadError(null);
+        try {
+            const url = await onUploadImage(file, setUploadStatus);
+            onUpdate({ ...block, url, alt: block.alt || file.name });
+        } catch (cause) {
+            setUploadError(cause instanceof Error ? cause.message : String(cause));
+        } finally {
+            setUploadStatus(null);
+        }
+    };
+    const kind =
+        block.type === "link"
+            ? block.variant === "pill"
+                ? "Button"
+                : "Link"
+            : "Image";
+
+    return (
+        <div className="sheet-backdrop" onClick={onClose}>
+            <div
+                className="sheet"
+                role="dialog"
+                aria-label={`Edit ${kind}`}
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="sheet-title">Edit {kind}</div>
+                {block.type === "link" && (
+                    <>
+                        <label className="sheet-field">
+                            <span>Label</span>
+                            <input
+                                type="text"
+                                value={block.label}
+                                onChange={(e) =>
+                                    onUpdate({ ...block, label: e.target.value })
+                                }
+                                placeholder={kind === "Button" ? "Button text" : "Link text"}
+                            />
+                        </label>
+                        <label className="sheet-field">
+                            <span>URL</span>
+                            <input
+                                type="url"
                                 value={block.url}
-                                onChange={(url) => onUpdate({ ...block, url })}
-                                editable
-                                className="site-link-url"
+                                onChange={(e) =>
+                                    onUpdate({ ...block, url: e.target.value })
+                                }
+                                placeholder="https://"
+                            />
+                        </label>
+                    </>
+                )}
+                {block.type === "image" && (
+                    <>
+                        <label className="image-upload sheet-upload">
+                            <input
+                                type="file"
+                                accept="image/*"
+                                disabled={uploading}
+                                onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    e.target.value = "";
+                                    if (file) await handleFile(file);
+                                }}
+                            />
+                            <span>
+                                {uploading
+                                    ? "Uploading…"
+                                    : maxStoreBytes !== null && maxStoreBytes > 0
+                                      ? `Upload image (auto-resize → ≤${Math.floor(maxStoreBytes / 1024)} KB)`
+                                      : "Upload image"}
+                            </span>
+                        </label>
+                        {uploading && uploadStatus && (
+                            <StepProgress
+                                steps={UPLOAD_STEPS}
+                                step={stepForUploadStatus(uploadStatus)}
+                                status={uploadStatus}
+                            />
+                        )}
+                        {uploadError && (
+                            <pre className="image-upload-error">{uploadError}</pre>
+                        )}
+                        <label className="sheet-field">
+                            <span>Image URL</span>
+                            <input
+                                type="url"
+                                value={block.url}
+                                onChange={(e) =>
+                                    onUpdate({ ...block, url: e.target.value })
+                                }
                                 placeholder="https:// or upload above"
                             />
-                            {uploadError && (
-                                <pre className="image-upload-error">{uploadError}</pre>
-                            )}
+                        </label>
+                        <label className="sheet-field">
+                            <span>Alt text</span>
+                            <input
+                                type="text"
+                                value={block.alt}
+                                onChange={(e) =>
+                                    onUpdate({ ...block, alt: e.target.value })
+                                }
+                                placeholder="Describe the image"
+                            />
+                        </label>
+                        <div className="sheet-field">
+                            <span>Size</span>
                             <VariantToggle
                                 label="Image size"
                                 options={[
@@ -1492,10 +1594,17 @@ function BlockView({
                                 }
                             />
                         </div>
-                    )}
-                </>
-            )}
-            {block.type === "divider" && <hr className="site-divider" />}
+                    </>
+                )}
+                <div className="sheet-actions">
+                    <button className="sheet-delete" onClick={onDelete}>
+                        Delete
+                    </button>
+                    <button className="sheet-done" onClick={onClose}>
+                        Done
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }
