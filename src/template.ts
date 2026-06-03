@@ -3,8 +3,10 @@
 // the result is a single byte blob we can hash and store in one
 // TransactionStorage.store call.
 
-/** Image sizes — always rendered centered. "small" is a round 256px pfp. */
+/** Image sizes — always rendered centered. small=256px, medium=512px, large=full width. */
 export type ImageVariant = "small" | "medium" | "large";
+/** Corner treatment. "circle" also crops to a 1:1 square. */
+export type ImageShape = "circle" | "rounded" | "square";
 export type LinkVariant = "default" | "pill";
 export type TextAlign = "left" | "center";
 
@@ -28,6 +30,7 @@ export type Block =
           url: string;
           alt: string;
           variant?: ImageVariant;
+          shape?: ImageShape;
       }
     | { id: string; type: "divider" };
 
@@ -50,6 +53,13 @@ export function imageSize(variant?: string): ImageVariant {
     if (variant === "small" || variant === "avatar") return "small";
     if (variant === "medium") return "medium";
     return "large";
+}
+
+// Shape with legacy default: small images used to be circles (pfp), so an
+// unset shape on a small image stays a circle; everything else is rounded.
+export function imageShape(block: { variant?: string; shape?: ImageShape }): ImageShape {
+    if (block.shape) return block.shape;
+    return imageSize(block.variant) === "small" ? "circle" : "rounded";
 }
 
 export const DEFAULT_CONTENT: SiteContent = {
@@ -137,7 +147,12 @@ function renderBlock(block: Block): string {
         }
         case "image": {
             const size = imageSize(block.variant);
-            const cls = size === "large" ? "" : ` class="img-${size}"`;
+            const shape = imageShape(block);
+            const classes = [
+                ...(size !== "large" ? [`img-${size}`] : []),
+                ...(shape !== "rounded" ? [`img-${shape}`] : []),
+            ];
+            const cls = classes.length ? ` class="${classes.join(" ")}"` : "";
             return `<img${cls} src="${safeUrl(block.url)}" alt="${escapeHtml(block.alt)}">`;
         }
         case "divider":
@@ -159,7 +174,13 @@ export interface PageTheme {
 // Optional CSS chunks, keyed by feature. Only the chunks a page actually uses
 // are emitted — keeps layout-specific rules from bleeding into the document
 // handed to the raw-HTML editor, and trims bytes off the deploy artifact.
-export type ShellFeature = "markdown" | "img-small" | "img-medium" | "pill";
+export type ShellFeature =
+    | "markdown"
+    | "img-small"
+    | "img-medium"
+    | "img-circle"
+    | "img-square"
+    | "pill";
 
 interface FeatureCssContext {
     accent: string;
@@ -177,13 +198,14 @@ blockquote { margin: 0 0 16px; padding-left: 16px; border-left: 3px solid ${acce
 code { font-family: ui-monospace, Menlo, monospace; font-size: 0.9em; background: ${divider}; padding: 2px 5px; border-radius: 4px; }
 pre { margin: 0 0 16px; padding: 16px; background: ${divider}; border-radius: 12px; overflow-x: auto; }
 pre code { background: none; padding: 0; }`,
-    "img-small": () => `img.img-small {
-    width: min(256px, 100%);
+    "img-small": () => `img.img-small { width: min(256px, 100%); }`,
+    "img-medium": () => `img.img-medium { width: min(512px, 100%); }`,
+    "img-circle": () => `img.img-circle {
     aspect-ratio: 1;
     object-fit: cover;
     border-radius: 50%;
 }`,
-    "img-medium": () => `img.img-medium { width: min(512px, 100%); }`,
+    "img-square": () => `img.img-square { border-radius: 0; }`,
     pill: ({ accent, accentContrast }) => `p.pill { text-align: center; margin: 20px 0; }
 p.pill a {
     display: inline-block;
@@ -284,11 +306,13 @@ export function renderHtmlParts(content: SiteContent): DocumentParts {
     const blocks = content.blocks.map(renderBlock).join("\n    ");
 
     const features: ShellFeature[] = [];
-    const sizes = content.blocks
-        .filter((b) => b.type === "image")
-        .map((b) => imageSize((b as { variant?: string }).variant));
+    const images = content.blocks.filter((b) => b.type === "image");
+    const sizes = images.map((b) => imageSize(b.variant));
+    const shapes = images.map((b) => imageShape(b));
     if (sizes.includes("small")) features.push("img-small");
     if (sizes.includes("medium")) features.push("img-medium");
+    if (shapes.includes("circle")) features.push("img-circle");
+    if (shapes.includes("square")) features.push("img-square");
     if (content.blocks.some((b) => b.type === "link" && b.variant === "pill"))
         features.push("pill");
 

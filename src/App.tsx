@@ -11,9 +11,11 @@ import {
     FONT_OPTIONS,
     renderHtml,
     renderHtmlParts,
+    imageShape,
     imageSize,
     siteColors,
     type Block,
+    type ImageShape,
     type ImageVariant,
     type SiteContent,
     type TextAlign,
@@ -31,8 +33,12 @@ import {
     tryExtensionAccount,
     tryHostAccount,
 } from "./account.ts";
-import { checkBulletinAuthorization, storeBytes } from "./lib/bulletin/store.ts";
-import { resizeImageToFit } from "./image-resize.ts";
+import {
+    checkBulletinAuthorization,
+    MAX_TX_BYTES,
+    storeBytes,
+} from "./lib/bulletin/store.ts";
+import { MAX_IMAGE_DIMENSION, resizeImageToFit } from "./image-resize.ts";
 import { TEMPLATES, type Template } from "./templates.ts";
 import {
     blocksToMarkdown,
@@ -441,23 +447,21 @@ export default function App() {
                 "Sign in first — pick //Bob in the Deploy panel, or connect a wallet.",
             );
         }
-        let bytes: Uint8Array;
-        let label = `Image (${file.name || "untitled"})`;
-        if (maxStoreBytes !== null && file.size > maxStoreBytes) {
-            onStatus(
-                `Resizing ${(file.size / 1024).toFixed(0)} KB → under ${(maxStoreBytes / 1024).toFixed(0)} KB…`,
-            );
-            const target = Math.floor(maxStoreBytes * 0.95);
-            const resized = await resizeImageToFit(file, target);
-            bytes = resized.bytes;
-            label = `Image (${resized.filename})`;
-            onStatus(
-                `Resized ${(resized.originalBytes / 1024).toFixed(0)} KB → ${(resized.finalBytes / 1024).toFixed(0)} KB. Uploading…`,
-            );
-        } else {
-            bytes = new Uint8Array(await file.arrayBuffer());
-            onStatus("Uploading to Bulletin…");
-        }
+        // Every upload is optimized: downscaled to the largest dimension the
+        // page can display (1280px) and re-encoded — images that already fit
+        // pass through untouched. The byte budget is the smaller of the chain's
+        // per-tx cap and the account authorization (chain cap even when the
+        // auth query failed).
+        const uploadLimit = Math.min(MAX_TX_BYTES, maxStoreBytes || MAX_TX_BYTES);
+        onStatus("Optimizing image…");
+        const resized = await resizeImageToFit(file, Math.floor(uploadLimit * 0.95));
+        const bytes = resized.bytes;
+        const label = `Image (${resized.filename || "untitled"})`;
+        onStatus(
+            resized.finalBytes !== resized.originalBytes
+                ? `Optimized ${(resized.originalBytes / 1024).toFixed(0)} KB → ${(resized.finalBytes / 1024).toFixed(0)} KB. Uploading…`
+                : "Uploading to Bulletin…",
+        );
         const stored = await storeBytes({
             bytes,
             signer: activeAccount.signer,
@@ -899,7 +903,7 @@ export default function App() {
                     }}
                     onClose={() => setEditingBlockId(null)}
                     onUploadImage={uploadImage}
-                    maxStoreBytes={maxStoreBytes}
+                    maxStoreBytes={Math.min(MAX_TX_BYTES, maxStoreBytes || MAX_TX_BYTES)}
                 />
             )}
 
@@ -1426,14 +1430,14 @@ function BlockView({
             {block.type === "image" &&
                 (block.url && block.url !== "https://" ? (
                     <img
-                        className={`site-image is-${imageSize(block.variant)} ${editable ? "block-tap" : ""}`}
+                        className={`site-image is-${imageSize(block.variant)} is-${imageShape(block)} ${editable ? "block-tap" : ""}`}
                         src={block.url}
                         alt={block.alt}
                         onClick={editable ? onEdit : undefined}
                     />
                 ) : editable ? (
                     <div
-                        className={`site-image-placeholder is-${imageSize(block.variant)} block-tap`}
+                        className={`site-image-placeholder is-${imageSize(block.variant)} is-${imageShape(block)} block-tap`}
                         onClick={onEdit}
                         role="button"
                         tabIndex={0}
@@ -1463,7 +1467,7 @@ function BlockEditSheet({
     onDelete: () => void;
     onClose: () => void;
     onUploadImage: (file: File, onStatus: (msg: string) => void) => Promise<string>;
-    maxStoreBytes: number | null;
+    maxStoreBytes: number;
 }) {
     const [uploadStatus, setUploadStatus] = useState<string | null>(null);
     const [uploadError, setUploadError] = useState<string | null>(null);
@@ -1536,14 +1540,13 @@ function BlockEditSheet({
                                     if (file) await handleFile(file);
                                 }}
                             />
-                            <span>
-                                {uploading
-                                    ? "Uploading…"
-                                    : maxStoreBytes !== null && maxStoreBytes > 0
-                                      ? `Upload image (auto-resize → ≤${Math.floor(maxStoreBytes / 1024)} KB)`
-                                      : "Upload image"}
-                            </span>
+                            <span>{uploading ? "Uploading…" : "Upload image"}</span>
                         </label>
+                        <p className="sheet-hint">
+                            Uploads are optimized for the page: resized to ≤
+                            {MAX_IMAGE_DIMENSION}px and compressed (max{" "}
+                            {(maxStoreBytes / 1024 / 1024).toFixed(0)} MB).
+                        </p>
                         {uploading && uploadStatus && (
                             <StepProgress
                                 steps={UPLOAD_STEPS}
@@ -1581,15 +1584,36 @@ function BlockEditSheet({
                             <VariantToggle
                                 label="Image size"
                                 options={[
-                                    { value: "small", name: "Small" },
-                                    { value: "medium", name: "Medium" },
-                                    { value: "large", name: "Large" },
+                                    { value: "small", name: "Small · 256px" },
+                                    { value: "medium", name: "Medium · 512px" },
+                                    { value: "large", name: "Large · full" },
                                 ]}
                                 value={imageSize(block.variant)}
                                 onChange={(variant) =>
                                     onUpdate({
                                         ...block,
                                         variant: variant as ImageVariant,
+                                        // Pin the shape so changing size never
+                                        // silently changes corners.
+                                        shape: imageShape(block),
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className="sheet-field">
+                            <span>Shape</span>
+                            <VariantToggle
+                                label="Image shape"
+                                options={[
+                                    { value: "circle", name: "Circle" },
+                                    { value: "rounded", name: "Rounded" },
+                                    { value: "square", name: "Square" },
+                                ]}
+                                value={imageShape(block)}
+                                onChange={(shape) =>
+                                    onUpdate({
+                                        ...block,
+                                        shape: shape as ImageShape,
                                     })
                                 }
                             />

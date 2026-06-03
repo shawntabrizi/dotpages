@@ -47,17 +47,17 @@ body {
 .site-link-url { font-size: 12px; color: var(--chrome-text2); margin-left: 8px; word-break: break-all; }
 /* Images are always centered; sizes mirror the artifact's img-* rules. */
 .site-image { max-width: 100%; height: auto; border-radius: 12px; margin: 16px auto; display: block; }
-.site-image.is-small {
-    width: min(256px, 100%);
+.site-image.is-small { width: min(256px, 100%); }
+.site-image.is-medium { width: min(512px, 100%); }
+.site-image.is-circle {
     aspect-ratio: 1;
     object-fit: cover;
     border-radius: 50%;
 }
-.site-image.is-medium { width: min(512px, 100%); }
+.site-image.is-square { border-radius: 0; }
 .site-image-placeholder.is-small {
     width: min(256px, 100%);
     aspect-ratio: 1;
-    border-radius: 50%;
     margin-left: auto;
     margin-right: auto;
     padding: 0;
@@ -66,6 +66,8 @@ body {
     justify-content: center;
     font-size: 11px;
 }
+.site-image-placeholder.is-circle { border-radius: 50%; }
+.site-image-placeholder.is-square { border-radius: 0; }
 
 .site-image-placeholder {
     border: 1px dashed color-mix(in srgb, var(--site-foreground, #f5f5f5), transparent 80%);

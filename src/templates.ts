@@ -51,6 +51,7 @@ export const TEMPLATES: readonly Template[] = [
                     id: id(),
                     type: "image",
                     variant: "small",
+                    shape: "circle",
                     url: "https://",
                     alt: "Profile photo",
                 },

@@ -8,7 +8,9 @@ import { BULLETIN_FAUCET_URL, BULLETIN_GATEWAY } from "../polkadot/constants.ts"
 import { computeCID } from "./cid.ts";
 import { submitAndWait, type DeployStatus } from "./submit-and-wait.ts";
 
-const MAX_SIZE = 2 * 1024 * 1024; // 2 MiB on Paseo Next (8 MiB on Polkadot Bulletin)
+/** Per-transaction chain cap — applies regardless of account authorization. */
+export const MAX_TX_BYTES = 2 * 1024 * 1024; // 2 MiB on Paseo Next (8 MiB on Polkadot Bulletin)
+const MAX_SIZE = MAX_TX_BYTES;
 
 export interface StoreHTMLResult {
     cid: string;
