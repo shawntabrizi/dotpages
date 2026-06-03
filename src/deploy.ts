@@ -3,26 +3,15 @@
 //   2. DotNS register (label → owned)
 //   3. DotNS setContenthash (CID ↔ label)
 //
-// The host/extension paths still preview-only because their signers need
-// extra wiring for chain submission (host's signBytes is stubbed; extensions
-// may not have Bulletin/PAS authorization).
+// All account sources (host / extension / dev) submit for real — readiness
+// is judged up front by src/preflight.ts, not by gating the deploy path.
 
 import { storeHTML } from "./lib/bulletin/store.ts";
-import { computeCID } from "./lib/bulletin/cid.ts";
 import { getEvmAddress } from "./lib/dotns/address.ts";
 import { registerDomain, checkDomainAvailability } from "./lib/dotns/register.ts";
 import { setContentHash } from "./lib/dotns/content-hash.ts";
-import { BULLETIN_GATEWAY, DOT_HOST } from "./lib/polkadot/constants.ts";
+import { DOT_HOST } from "./lib/polkadot/constants.ts";
 import type { ActiveAccount } from "./account.ts";
-
-export interface DeployPreview {
-    kind: "preview";
-    bytes: number;
-    cid: string;
-    domain: string;
-    url: string;
-    gatewayUrl: string;
-}
 
 export interface DeploySuccess {
     kind: "stored";
@@ -45,7 +34,7 @@ export type StatusFn = (message: string) => void;
 
 // Auto-derive a NoStatus-shape label from the rendered header text. Matches
 // `dot decentralize`'s rule: base ≥9 + exactly 2 trailing digits → NoStatus.
-function deriveDomain(seed: string): string {
+export function deriveDomain(seed: string): string {
     let s = seed
         .toLowerCase()
         .replace(/[^a-z0-9-]/g, "-")
@@ -66,32 +55,17 @@ function deriveDomain(seed: string): string {
     return `${s}-${padded}${digits}`;
 }
 
-// ── Preview (no chain submission, host/extension fallback) ──────────────────
+// ── Real end-to-end deploy ──────────────────────────────────────────────────
 
-export async function previewDeploy(html: string, domain: string | null): Promise<DeployPreview> {
-    const bytes = new TextEncoder().encode(html);
-    const cid = computeCID(bytes).toString();
-    const finalDomain = (domain ?? "").replace(/\.dot$/i, "") || deriveDomain(html.slice(0, 64));
-    return {
-        kind: "preview",
-        bytes: bytes.length,
-        cid,
-        domain: finalDomain,
-        url: `https://${finalDomain}.${DOT_HOST}`,
-        gatewayUrl: `${BULLETIN_GATEWAY}${cid}`,
-    };
-}
-
-// ── Real end-to-end deploy (//Bob path) ─────────────────────────────────────
-
+// `finalLabel` is the already-resolved label (typed or auto-derived) — the
+// caller resolves it once so pre-flight checks and the deploy agree on the
+// exact name being registered.
 export async function deployFull(
     html: string,
-    domain: string | null,
+    finalLabel: string,
     account: ActiveAccount,
     onStatus: StatusFn,
 ): Promise<DeploySuccess> {
-    const finalLabel = (domain ?? "").replace(/\.dot$/i, "") || deriveDomain(html.slice(0, 64));
-
     // Phase 1 — Bulletin store
     onStatus("Bulletin: connecting…");
     const stored = await storeHTML({

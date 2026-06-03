@@ -6,9 +6,10 @@
 // the app tries the Host API first (Polkadot Desktop / Mobile) and only
 // surfaces the extension/dev paths to the user when host is unavailable.
 //
-// `signBytes` here is for arbitrary-data signing. When the chain-submission
-// path lands we'll add a sibling `signer: PolkadotSigner` for use with
-// `signSubmitAndWatch`.
+// All three sources carry a real PAPI `PolkadotSigner` usable with
+// `signSubmitAndWatch`. The host's product-account signer is pinned to the
+// `createTransaction` signer type in product-sdk, so unknown signed
+// extensions (e.g. AsPgas on Paseo Next) survive end-to-end.
 
 import { ss58Encode, truncateAddress } from "@parity/product-sdk-address";
 import { createDevSigner, getDevPublicKey } from "@parity/product-sdk-tx";
@@ -56,26 +57,9 @@ export async function tryHostAccount(): Promise<ActiveAccount | null> {
         source: "host",
         address: account.address,
         displayName: account.name ?? truncateAddress(account.address),
-        // The host SignerAccount exposes a different signer interface than
-        // PAPI's PolkadotSigner. The actual chain-submit path will call
-        // `signerManager.signRaw` (or the host's tx-signer equivalent)
-        // rather than the bare PolkadotSigner — until that's wired we keep
-        // a stub here that throws so a misuse fails loud.
-        signer: stubHostSigner(),
-    };
-}
-
-function stubHostSigner(): PolkadotSigner {
-    const fail = (op: string): never => {
-        throw new Error(
-            `Host-signer ${op} is not wired yet. Use signerManager.signRaw(...) ` +
-                `or the host's tx signer when chain submission lands.`,
-        );
-    };
-    return {
-        publicKey: new Uint8Array(),
-        signBytes: () => Promise.reject(new Error("not wired")),
-        signTx: () => fail("signTx"),
+        // SignerAccount.getSigner() IS a PAPI PolkadotSigner (product-sdk
+        // routes it through host_create_transaction) — no adapter needed.
+        signer: account.getSigner(),
     };
 }
 

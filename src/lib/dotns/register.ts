@@ -38,11 +38,19 @@ export async function checkDomainAvailability(
     return !exists;
 }
 
-async function getDomainPrice(
+export interface DomainQuote {
+    /** Price in Wei (18 decimals). Null when neither price probe succeeded. */
+    price: bigint | null;
+    /** PoP-rules message for this label+owner (e.g. why it can't register). */
+    message: string | null;
+}
+
+/** Read-only price + PoP-rules verdict — used by pre-flight and register. */
+export async function quoteDomain(
     label: string,
     ownerEvmAddress: `0x${string}`,
     callerAddress: string,
-): Promise<bigint> {
+): Promise<DomainQuote> {
     const encoded = encodeFunctionData({
         abi: POP_RULES_ABI,
         functionName: "priceWithoutCheck",
@@ -62,12 +70,13 @@ async function getDomainPrice(
             callerAddress,
             fallback,
         );
-        if (!fbResult.success) return 0n;
-        return decodeFunctionResult({
+        if (!fbResult.success) return { price: null, message: null };
+        const price = decodeFunctionResult({
             abi: POP_RULES_ABI,
             functionName: "price",
             data: fbResult.returnData,
         });
+        return { price, message: null };
     }
 
     const metadata = decodeFunctionResult({
@@ -75,7 +84,15 @@ async function getDomainPrice(
         functionName: "priceWithoutCheck",
         data: result.returnData,
     }) as { price: bigint; status: number; userStatus: number; message: string };
-    return metadata.price;
+    return { price: metadata.price, message: metadata.message || null };
+}
+
+async function getDomainPrice(
+    label: string,
+    ownerEvmAddress: `0x${string}`,
+    callerAddress: string,
+): Promise<bigint> {
+    return (await quoteDomain(label, ownerEvmAddress, callerAddress)).price ?? 0n;
 }
 
 async function getMinCommitmentAge(callerAddress: string): Promise<number> {

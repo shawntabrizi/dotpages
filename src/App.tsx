@@ -20,12 +20,9 @@ import {
     type SiteContent,
     type TextAlign,
 } from "./template.ts";
-import {
-    deployFull,
-    previewDeploy,
-    type DeployPreview,
-    type DeploySuccess,
-} from "./deploy.ts";
+import { deployFull, deriveDomain, type DeploySuccess } from "./deploy.ts";
+import { runPreflight, type PreflightReport } from "./preflight.ts";
+import { useResourceAllocationState } from "./signer.ts";
 import {
     type ActiveAccount,
     getDevAccount,
@@ -66,7 +63,7 @@ function titleFromHtml(body: string): string {
     const text = m ? m[1].replace(/<[^>]*>/g, "").trim() : "";
     return text || "hello";
 }
-type DeployResult = DeployPreview | DeploySuccess;
+type DeployResult = DeploySuccess;
 
 interface ProgressStep {
     readonly id: string;
@@ -207,32 +204,48 @@ export default function App() {
     const toggleMenu = (menu: ActionMenu) =>
         setOpenMenu((prev) => (prev === menu ? null : menu));
 
-    // Signer state — Bob default, owned-account opt-in.
-    const [useOwnedAccount, setUseOwnedAccount] = useState(false);
+    // Signer state — host-first (this app's primary environment is Polkadot
+    // Desktop/Mobile), browser extension as standalone fallback, //Bob behind
+    // an explicit dev toggle.
+    const [useDevAccount, setUseDevAccount] = useState(false);
     const [hostAccount, setHostAccount] = useState<ActiveAccount | null>(null);
     const [extensionAccount, setExtensionAccount] = useState<ActiveAccount | null>(null);
-    const [resolvingOwned, setResolvingOwned] = useState(false);
+    const [resolvingOwned, setResolvingOwned] = useState(true);
     const [ownedError, setOwnedError] = useState<string | null>(null);
     const [maxStoreBytes, setMaxStoreBytes] = useState<number | null>(null);
 
     const devAccount = useMemo(() => getDevAccount(), []);
-    const activeAccount: ActiveAccount | null = useOwnedAccount
-        ? extensionAccount ?? hostAccount
-        : devAccount;
+    const activeAccount: ActiveAccount | null = useDevAccount
+        ? devAccount
+        : hostAccount ?? extensionAccount;
 
+    // Try the host once on mount — the default signer when running inside
+    // Polkadot Desktop/Mobile. Resolves to null in a plain browser.
     useEffect(() => {
-        if (!useOwnedAccount || hostAccount || extensionAccount) return;
-        setResolvingOwned(true);
-        setOwnedError(null);
+        let cancelled = false;
         tryHostAccount()
             .then((account) => {
-                if (account) setHostAccount(account);
+                if (!cancelled && account) setHostAccount(account);
             })
             .catch((cause) => {
-                setOwnedError(cause instanceof Error ? cause.message : String(cause));
+                if (!cancelled)
+                    setOwnedError(cause instanceof Error ? cause.message : String(cause));
             })
-            .finally(() => setResolvingOwned(false));
-    }, [useOwnedAccount, hostAccount, extensionAccount]);
+            .finally(() => {
+                if (!cancelled) setResolvingOwned(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // Host resource grants (BulletinAllowance etc.) — requested in the
+    // background at connect; the SmartContractAllowance outcome feeds the
+    // pre-flight fee check.
+    const resourceAllocation = useResourceAllocationState();
+    const contractAllowance =
+        resourceAllocation.entries.find((e) => e.resource === "SmartContractAllowance")
+            ?.outcome ?? null;
 
     useEffect(() => {
         const address = activeAccount?.address;
@@ -253,6 +266,59 @@ export default function App() {
             cancelled = true;
         };
     }, [activeAccount?.address]);
+
+    // ── Deploy pre-flight ────────────────────────────────────────────────
+    // The auto-derived label has random padding, so it's generated ONCE per
+    // session and shown in the field — the name the checklist verifies is
+    // byte-for-byte the name deployFull registers.
+    const [autoLabel, setAutoLabel] = useState<string | null>(null);
+    const [preflight, setPreflight] = useState<PreflightReport | null>(null);
+    const [preflightBusy, setPreflightBusy] = useState(false);
+    const effectiveLabel = domain.trim().replace(/\.dot$/i, "") || autoLabel || "";
+
+    // Intentionally narrow deps: derive once, on the first visit to the
+    // deploy view, from whatever the content is at that moment.
+    useEffect(() => {
+        if (view === "deploy" && !autoLabel) {
+            setAutoLabel(deriveDomain(currentHtml().slice(0, 64)));
+        }
+    }, [view, autoLabel]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Auto-run the checklist whenever the deploy view is open and any input
+    // changes (account, name, content via view switch). Debounced so name
+    // keystrokes don't hammer the RPC; all checks are read-only dry-runs.
+    useEffect(() => {
+        if (view !== "deploy" || !activeAccount || !effectiveLabel) {
+            setPreflight(null);
+            return;
+        }
+        let cancelled = false;
+        setPreflightBusy(true);
+        setResult(null); // inputs changed — a previous deploy result is stale
+        const t = setTimeout(() => {
+            runPreflight({
+                html: currentHtml(),
+                label: effectiveLabel,
+                account: activeAccount,
+                contractAllowance,
+            })
+                .then((report) => {
+                    if (!cancelled) setPreflight(report);
+                })
+                .catch(() => {
+                    if (!cancelled) setPreflight(null);
+                })
+                .finally(() => {
+                    if (!cancelled) setPreflightBusy(false);
+                });
+        }, 400);
+        return () => {
+            cancelled = true;
+            clearTimeout(t);
+        };
+        // currentHtml is stable for a given content/mode; content edits can
+        // only happen in the edit view, so the `view` dep re-checks on return.
+    }, [view, effectiveLabel, activeAccount, contractAllowance]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Debounced draft autosave — every edit lands in localStorage shortly after.
     const draft: Draft = { mode, content, markdownText, htmlText, cssText, jsText };
@@ -526,19 +592,16 @@ export default function App() {
             setDeployStep(stepForDeployStatus(message));
         };
         try {
-            const html = currentHtml();
-            if (activeAccount?.source === "dev") {
-                const stored = await deployFull(
-                    html,
-                    domain || null,
-                    activeAccount,
-                    updateDeployStatus,
-                );
-                setResult(stored);
-            } else {
-                const preview = await previewDeploy(html, domain || null);
-                setResult(preview);
+            if (!activeAccount || !effectiveLabel) {
+                throw new Error("No account connected or no name resolved");
             }
+            const stored = await deployFull(
+                currentHtml(),
+                effectiveLabel,
+                activeAccount,
+                updateDeployStatus,
+            );
+            setResult(stored);
         } catch (cause) {
             setDeployError(cause instanceof Error ? cause.message : String(cause));
         } finally {
@@ -553,9 +616,12 @@ export default function App() {
         isEditing && mode === "blocks"
             ? content.blocks.find((b) => b.id === editingBlockId) ?? null
             : null;
-    const canDeploy = !busy && activeAccount !== null;
+    // Deploy is gated on the pre-flight checklist: every blocking check must
+    // pass ("warn" entries don't block — see preflight.ts severity model).
+    const canDeploy =
+        !busy && activeAccount !== null && !preflightBusy && preflight?.ok === true;
     const showOwnedHint =
-        useOwnedAccount && !hostAccount && !extensionAccount && !resolvingOwned;
+        !useDevAccount && !hostAccount && !extensionAccount && !resolvingOwned;
 
     const colors = siteColors(content.background);
     const foreground = content.textColor ?? colors.foreground;
@@ -955,19 +1021,7 @@ export default function App() {
                                   ? "connecting…"
                                   : "no signer"}
                         </span>
-                        <label className="checkbox">
-                            <input
-                                type="checkbox"
-                                checked={useOwnedAccount}
-                                onChange={(e) => setUseOwnedAccount(e.target.checked)}
-                                disabled={busy}
-                            />
-                            <span>
-                                Sign with my own account
-                                <span className="checkbox-hint"> — default is //Bob</span>
-                            </span>
-                        </label>
-                        {useOwnedAccount && !hostAccount && !extensionAccount && (
+                        {!useDevAccount && !hostAccount && !extensionAccount && (
                             <button
                                 className="pill pill-secondary"
                                 onClick={connectExtension}
@@ -981,9 +1035,24 @@ export default function App() {
                                 No host signer detected. Open in{" "}
                                 <strong>Polkadot Desktop</strong> or{" "}
                                 <strong>Polkadot Mobile</strong>, connect a browser wallet,
-                                or untick to deploy as //Bob.
+                                or tick the dev option below.
                             </p>
                         )}
+                        <label className="checkbox">
+                            <input
+                                type="checkbox"
+                                checked={useDevAccount}
+                                onChange={(e) => setUseDevAccount(e.target.checked)}
+                                disabled={busy}
+                            />
+                            <span>
+                                Use the //Bob dev account
+                                <span className="checkbox-hint">
+                                    {" "}
+                                    — local testing without a wallet
+                                </span>
+                            </span>
+                        </label>
                         {ownedError && <p className="hint subtle">{ownedError}</p>}
                     </div>
 
@@ -992,9 +1061,11 @@ export default function App() {
                             <span className="field-label">.dot name</span>
                             <input
                                 type="text"
-                                placeholder="auto-generated if blank"
+                                placeholder={autoLabel ?? "auto-generated if blank"}
                                 value={domain}
-                                onChange={(e) => setDomain(e.target.value.trim())}
+                                onChange={(e) =>
+                                    setDomain(e.target.value.trim().toLowerCase())
+                                }
                                 disabled={busy}
                             />
                         </label>
@@ -1003,16 +1074,57 @@ export default function App() {
                     <div className="deploy-field">
                         <span className="field-label">URL</span>
                         <span className="url-preview">
-                            {`https://${domain || "<auto>"}.${DOT_HOST}`}
+                            {`https://${effectiveLabel || "<auto>"}.${DOT_HOST}`}
                         </span>
                     </div>
+
+                    {/* Pre-flight checklist — read-only checks, auto-run. */}
+                    {!busy && (preflight || preflightBusy) && (
+                        <div className="preflight" role="status" aria-label="Pre-flight checks">
+                            {preflight?.checks.map((check) => (
+                                <div
+                                    key={check.id}
+                                    className={`check-row check-${check.state}`}
+                                >
+                                    <span className="check-icon" aria-hidden="true">
+                                        {check.state === "ok"
+                                            ? "✓"
+                                            : check.state === "warn"
+                                              ? "!"
+                                              : "✕"}
+                                    </span>
+                                    <span className="check-label">{check.label}</span>
+                                    <span className="check-detail">
+                                        {check.detail}
+                                        {check.link && (
+                                            <>
+                                                {" — "}
+                                                <a
+                                                    href={check.link}
+                                                    target="_blank"
+                                                    rel="noopener"
+                                                >
+                                                    faucet
+                                                </a>
+                                            </>
+                                        )}
+                                    </span>
+                                </div>
+                            ))}
+                            {preflightBusy && (
+                                <p className="hint subtle">
+                                    {preflight ? "Re-checking…" : "Running pre-flight checks…"}
+                                </p>
+                            )}
+                        </div>
+                    )}
 
                     <button
                         className="pill pill-primary pill-wide"
                         onClick={deploy}
                         disabled={!canDeploy}
                     >
-                        {busy ? "Deploying…" : "Deploy"}
+                        {busy ? "Deploying…" : preflightBusy ? "Checking…" : "Deploy"}
                     </button>
 
                     {busy && status && deployStep !== null && (
@@ -1024,7 +1136,7 @@ export default function App() {
                     )}
 
                     {result && (
-                        <div className={`result result-${result.kind}`}>
+                        <div className="result result-stored">
                             <Row label="bytes">{result.bytes.toLocaleString()} B</Row>
                             <Row label="CID" mono>
                                 {result.cid}
@@ -1034,12 +1146,10 @@ export default function App() {
                                     {result.gatewayUrl}
                                 </a>
                             </Row>
-                            {result.kind === "stored" && (
-                                <Row label="block">
-                                    #{result.blockNumber.toLocaleString()}
-                                </Row>
-                            )}
-                            {result.kind === "stored" && result.dotMapped ? (
+                            <Row label="block">
+                                #{result.blockNumber.toLocaleString()}
+                            </Row>
+                            {result.dotMapped ? (
                                 <p className="result-note success">
                                     Live on{" "}
                                     <a href={result.url} target="_blank" rel="noopener">
@@ -1047,7 +1157,7 @@ export default function App() {
                                     </a>
                                     . Resolution may take a few seconds to propagate.
                                 </p>
-                            ) : result.kind === "stored" ? (
+                            ) : (
                                 <div className="result-note">
                                     <p>
                                         Stored on Bulletin ✓. The{" "}
@@ -1060,15 +1170,12 @@ export default function App() {
                                         </pre>
                                     )}
                                     {result.dotError && (
-                                        <DotErrorHint message={result.dotError} />
+                                        <DotErrorHint
+                                            message={result.dotError}
+                                            address={activeAccount?.address ?? ""}
+                                        />
                                     )}
                                 </div>
-                            ) : (
-                                <p className="result-note">
-                                    Preview only — chain submission for{" "}
-                                    {activeAccount?.source ?? "this signer"} isn't wired.
-                                    Untick "Sign with my own account" to deploy as //Bob.
-                                </p>
                             )}
                         </div>
                     )}
@@ -1727,7 +1834,7 @@ function VariantToggle({
 // Heuristic hint mapping common DotNS failures to actionable next steps.
 // The error strings come from pallet-revive dispatch errors, JSON-serialised
 // in submit-and-wait, so they're greppable.
-function DotErrorHint({ message }: { message: string }) {
+function DotErrorHint({ message, address }: { message: string; address: string }) {
     const lower = message.toLowerCase();
 
     if (
@@ -1738,14 +1845,18 @@ function DotErrorHint({ message }: { message: string }) {
     ) {
         return (
             <p className="hint">
-                <strong>Likely cause:</strong> //Bob has no PAS on Asset Hub Next to
-                pay contract fees. Hit the{" "}
+                <strong>Likely cause:</strong> the account has no PAS on Asset Hub
+                Next to pay contract fees. Hit the{" "}
                 <a href={PAS_FAUCET_URL} target="_blank" rel="noopener">
                     Asset Hub faucet
-                </a>{" "}
-                (paste //Bob's address:{" "}
-                <code>5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty</code>) and
-                retry.
+                </a>
+                {address && (
+                    <>
+                        {" "}
+                        (paste the account address: <code>{address}</code>)
+                    </>
+                )}{" "}
+                and retry.
             </p>
         );
     }
@@ -1762,9 +1873,9 @@ function DotErrorHint({ message }: { message: string }) {
     if (lower.includes("accountunmapped") || lower.includes("mapping did not propagate")) {
         return (
             <p className="hint">
-                <strong>Likely cause:</strong> //Bob's SS58 → H160 mapping hasn't
-                landed yet. Wait ~30 s and retry — the map_account extrinsic needs to
-                finalise before contracts will accept calls.
+                <strong>Likely cause:</strong> the account's SS58 → H160 mapping
+                hasn't landed yet. Wait ~30 s and retry — the map_account extrinsic
+                needs to finalise before contracts will accept calls.
             </p>
         );
     }
@@ -1792,8 +1903,8 @@ function DotErrorHint({ message }: { message: string }) {
     return (
         <p className="hint">
             Unknown failure. The dispatch-error JSON above is from pallet-revive —
-            pasting it into chat will help diagnose. Common culprits: //Bob has no
-            PAS for fees, name already taken, or the AH-Next RPC choked.
+            pasting it into chat will help diagnose. Common culprits: the account
+            has no PAS for fees, name already taken, or the AH-Next RPC choked.
         </p>
     );
 }

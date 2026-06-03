@@ -56,6 +56,38 @@ function chargedStorageDeposit(value: unknown): bigint {
     return toBigInt(value);
 }
 
+/**
+ * Read-only probe: dry-run against the zero address. If the account is
+ * unmapped, pallet-revive returns AccountUnmapped — much faster than
+ * checking storage. Used standalone by pre-flight and by ensureAccountMapped.
+ */
+export async function isAccountMapped(signerAddress: string): Promise<boolean> {
+    if (mappedAccounts.has(signerAddress)) return true;
+    const { unsafeApi } = getAssetHubClient();
+    const test = await unsafeApi.apis.ReviveApi.call(
+        signerAddress,
+        ZERO_H160,
+        0n,
+        { ref_time: MAX_WEIGHT, proof_size: MAX_WEIGHT },
+        MAX_WEIGHT,
+        Binary.fromHex("0x"),
+    );
+    const r = test as {
+        result?: {
+            value?: {
+                type?: string;
+                value?: { type?: string; value?: { type?: string } };
+            };
+        };
+    };
+    const isUnmapped =
+        r.result?.value?.type === "Module" &&
+        r.result?.value?.value?.type === "Revive" &&
+        r.result?.value?.value?.value?.type === "AccountUnmapped";
+    if (!isUnmapped) mappedAccounts.add(signerAddress);
+    return !isUnmapped;
+}
+
 export async function ensureAccountMapped(
     signerAddress: string,
     signer: PolkadotSigner,
@@ -64,33 +96,8 @@ export async function ensureAccountMapped(
 
     const { unsafeApi, api } = getAssetHubClient();
 
-    // Probe: a dry-run against the zero address. If the account is unmapped,
-    // pallet-revive returns AccountUnmapped — much faster than checking storage.
     try {
-        const test = await unsafeApi.apis.ReviveApi.call(
-            signerAddress,
-            ZERO_H160,
-            0n,
-            { ref_time: MAX_WEIGHT, proof_size: MAX_WEIGHT },
-            MAX_WEIGHT,
-            Binary.fromHex("0x"),
-        );
-        const r = test as {
-            result?: {
-                value?: {
-                    type?: string;
-                    value?: { type?: string; value?: { type?: string } };
-                };
-            };
-        };
-        const isUnmapped =
-            r.result?.value?.type === "Module" &&
-            r.result?.value?.value?.type === "Revive" &&
-            r.result?.value?.value?.value?.type === "AccountUnmapped";
-        if (!isUnmapped) {
-            mappedAccounts.add(signerAddress);
-            return;
-        }
+        if (await isAccountMapped(signerAddress)) return;
     } catch {
         // fall through to mapping
     }
