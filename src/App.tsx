@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Editable } from "./Editable.tsx";
+
+// Lazy: CodeMirror is its own chunk, fetched only when md/html mode is opened.
+const CodeEditor = React.lazy(() => import("./CodeEditor.tsx"));
 import {
     assembleDocument,
     DEFAULT_CONTENT,
@@ -422,39 +425,42 @@ export default function App() {
                                         ? "script.js"
                                         : "index.html"}
                             </div>
-                        <textarea
-                            className="code-editor"
-                            value={
-                                mode === "markdown"
-                                    ? markdownText
-                                    : htmlPane === "css"
-                                      ? cssText
-                                      : htmlPane === "js"
-                                        ? jsText
-                                        : htmlText
+                        <React.Suspense
+                            fallback={
+                                <div className="code-editor-loading">
+                                    Loading editor…
+                                </div>
                             }
-                            onChange={(e) => {
-                                const v = e.target.value;
-                                if (mode === "markdown") setMarkdownText(v);
-                                else if (htmlPane === "css") setCssText(v);
-                                else if (htmlPane === "js") setJsText(v);
-                                else setHtmlText(v);
-                            }}
-                            spellCheck={false}
-                            autoCapitalize="none"
-                            autoCorrect="off"
-                            autoComplete="off"
-                            placeholder={
-                                mode === "html" && htmlPane === "js"
-                                    ? "// Runs at the end of <body>"
-                                    : undefined
-                            }
-                            aria-label={
-                                mode === "markdown"
-                                    ? "Markdown source"
-                                    : `${htmlPane.toUpperCase()} source`
-                            }
-                        />
+                        >
+                            <CodeEditor
+                                language={mode === "markdown" ? "markdown" : htmlPane}
+                                value={
+                                    mode === "markdown"
+                                        ? markdownText
+                                        : htmlPane === "css"
+                                          ? cssText
+                                          : htmlPane === "js"
+                                            ? jsText
+                                            : htmlText
+                                }
+                                onChange={(v) => {
+                                    if (mode === "markdown") setMarkdownText(v);
+                                    else if (htmlPane === "css") setCssText(v);
+                                    else if (htmlPane === "js") setJsText(v);
+                                    else setHtmlText(v);
+                                }}
+                                placeholder={
+                                    mode === "html" && htmlPane === "js"
+                                        ? "// Runs at the end of <body>"
+                                        : undefined
+                                }
+                                ariaLabel={
+                                    mode === "markdown"
+                                        ? "Markdown source"
+                                        : `${htmlPane.toUpperCase()} source`
+                                }
+                            />
+                        </React.Suspense>
                         </div>
                     </main>
                 ) : (

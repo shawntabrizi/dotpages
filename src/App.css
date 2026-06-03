@@ -867,22 +867,23 @@ body {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 11px;
 }
-.code-editor {
+.code-editor-host {
     flex: 1;
-    width: 100%;
-    padding: 14px;
-    background: transparent;
-    border: 0;
-    outline: none;
-    resize: none;
-    color: var(--chrome-text);
-    caret-color: var(--accent);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.code-editor-host .cm-editor { flex: 1; min-height: 0; }
+.code-editor-host .cm-editor.cm-focused { outline: none; }
+.code-editor-host .cm-editor .cm-scroller {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 13px;
     line-height: 1.6;
-    /* Soft wrap is the textarea default; `anywhere` additionally breaks long
-       unbroken strings (data/ipfs URLs) instead of forcing horizontal panning. */
-    overflow-wrap: anywhere;
+}
+.code-editor-loading {
+    padding: 14px;
+    color: var(--chrome-text2);
+    font-size: 13px;
 }
 
 .site-frame {
@@ -900,7 +901,7 @@ body {
     .float-bottom { bottom: calc(72px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px)); }
     .action-bar { padding: 5px 12px; gap: 6px; }
     /* ≥16px or iOS Safari zooms the viewport on focus and never zooms back. */
-    .code-editor { font-size: 16px; }
+    .code-editor-host .cm-editor .cm-scroller { font-size: 16px; }
     .deploy-panel {
         width: calc(100% - 16px);
         bottom: calc(80px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px));
