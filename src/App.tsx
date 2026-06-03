@@ -431,6 +431,9 @@ export default function App() {
                                 else setHtmlText(v);
                             }}
                             spellCheck={false}
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            autoComplete="off"
                             placeholder={
                                 mode === "html" && htmlPane === "js"
                                     ? "// Runs at the end of <body>"

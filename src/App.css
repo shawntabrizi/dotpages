@@ -842,7 +842,9 @@ body {
 
 .code-pane {
     min-height: 100dvh;
-    padding: 24px 16px calc(180px + env(safe-area-inset-bottom));
+    /* Bottom padding tracks the visual viewport (keyboard) like the floating
+       bars do, so the caret can't hide behind the keyboard or the pills. */
+    padding: 24px 16px calc(180px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px));
     display: flex;
 }
 .code-editor {
@@ -875,6 +877,8 @@ body {
     .site { padding: 64px 16px 160px; }
     .float-bottom { bottom: calc(72px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px)); }
     .action-bar { padding: 5px 12px; gap: 6px; }
+    /* ≥16px or iOS Safari zooms the viewport on focus and never zooms back. */
+    .code-editor { font-size: 16px; }
     .deploy-panel {
         width: calc(100% - 16px);
         bottom: calc(80px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px));
