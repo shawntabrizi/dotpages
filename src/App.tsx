@@ -11,9 +11,12 @@ import {
     FONT_OPTIONS,
     renderHtml,
     renderHtmlParts,
+    imageSize,
     siteColors,
     type Block,
+    type ImageVariant,
     type SiteContent,
+    type TextAlign,
 } from "./template.ts";
 import {
     deployFull,
@@ -125,6 +128,19 @@ interface Draft {
     jsText: string;
 }
 
+// Older drafts had fixed `header`/`subheader` fields (now heading/paragraph
+// blocks) and an `avatar` image variant (now size `small` via imageSize()).
+function migrateContent(c: SiteContent & { header?: string; subheader?: string }): SiteContent {
+    const lead: Block[] = [];
+    if (typeof c.header === "string" && c.header)
+        lead.push({ id: makeBlockId(), type: "heading", text: c.header });
+    if (typeof c.subheader === "string" && c.subheader)
+        lead.push({ id: makeBlockId(), type: "paragraph", text: c.subheader });
+    if (lead.length === 0) return c;
+    const { header: _h, subheader: _s, ...rest } = c;
+    return { ...rest, blocks: [...lead, ...c.blocks] };
+}
+
 function loadDraft(): Draft | null {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -133,7 +149,7 @@ function loadDraft(): Draft | null {
         if (!d || typeof d !== "object") return null;
         if (!d.content || !Array.isArray(d.content.blocks)) return null;
         if (!["blocks", "markdown", "html"].includes(d.mode)) return null;
-        return d;
+        return { ...d, content: migrateContent(d.content) };
     } catch {
         // Unavailable storage (private mode, sandbox) or corrupt JSON.
         return null;
@@ -142,12 +158,23 @@ function loadDraft(): Draft | null {
 
 const initialDraft = loadDraft();
 
-const BLOCK_PRESETS: Record<Block["type"], () => Block> = {
+// Add-menu entries. Link and Button are presented as two separate components
+// (a Button is a pill-styled link under the hood — no toggle between them).
+const BLOCK_PRESETS = {
+    heading: () => ({ id: makeBlockId(), type: "heading", text: "Heading" }),
     paragraph: () => ({ id: makeBlockId(), type: "paragraph", text: "Write something here…" }),
     link: () => ({ id: makeBlockId(), type: "link", label: "Link text", url: "https://" }),
+    button: () => ({
+        id: makeBlockId(),
+        type: "link",
+        variant: "pill",
+        label: "Button text",
+        url: "https://",
+    }),
     image: () => ({ id: makeBlockId(), type: "image", url: "https://", alt: "" }),
     divider: () => ({ id: makeBlockId(), type: "divider" }),
-};
+} satisfies Record<string, () => Block>;
+type BlockPreset = keyof typeof BLOCK_PRESETS;
 
 export default function App() {
     const [content, setContent] = useState<SiteContent>(
@@ -170,10 +197,6 @@ export default function App() {
     const [openMenu, setOpenMenu] = useState<ActionMenu | null>(null);
     const toggleMenu = (menu: ActionMenu) =>
         setOpenMenu((prev) => (prev === menu ? null : menu));
-    const [undoPayload, setUndoPayload] = useState<{
-        prior: SiteContent;
-        templateName: string;
-    } | null>(null);
 
     // Signer state — Bob default, owned-account opt-in.
     const [useOwnedAccount, setUseOwnedAccount] = useState(false);
@@ -308,29 +331,19 @@ export default function App() {
         snapshotContent(true);
         setContent((prev) => ({ ...prev, blocks: prev.blocks.filter((b) => b.id !== id) }));
     };
-    const addBlock = (type: Block["type"]) => {
+    const addBlock = (type: BlockPreset) => {
         snapshotContent(true);
         setContent((prev) => ({ ...prev, blocks: [...prev.blocks, BLOCK_PRESETS[type]()] }));
         setOpenMenu(null);
     };
 
+    // Applying a template snapshots into the undo stack like any other edit —
+    // the floating Undo button is the recovery path (no separate toast).
     const applyTemplate = (template: Template) => {
         snapshotContent(true);
-        setUndoPayload({ prior: content, templateName: template.name });
         setContent(template.build());
         setOpenMenu(null);
     };
-    const undoTemplate = () => {
-        if (!undoPayload) return;
-        snapshotContent(true);
-        setContent(undoPayload.prior);
-        setUndoPayload(null);
-    };
-    useEffect(() => {
-        if (!undoPayload) return;
-        const t = setTimeout(() => setUndoPayload(null), 10000);
-        return () => clearTimeout(t);
-    }, [undoPayload]);
 
     // The single HTML source of truth — preview and deploy both consume this,
     // so they stay mode-agnostic.
@@ -512,43 +525,11 @@ export default function App() {
         background: content.background,
         fontFamily: content.fontFamily,
         fontSize: content.fontSize ?? DEFAULT_FONT_SIZE,
+        textAlign: content.align ?? "left",
         color: foreground,
         "--site-foreground": foreground,
         "--site-divider": colors.divider,
     } as React.CSSProperties;
-
-    const isProfile = content.layout === "profile";
-    const avatarIdx = isProfile
-        ? content.blocks.findIndex((b) => b.type === "image" && b.variant === "avatar")
-        : -1;
-    const avatarBlock = avatarIdx >= 0 ? content.blocks[avatarIdx] : null;
-    const bodyBlocks = avatarBlock
-        ? content.blocks.filter((_, i) => i !== avatarIdx)
-        : content.blocks;
-
-    const titleEditable = (
-        <Editable
-            tag="h1"
-            value={content.header}
-            onChange={(v) => update("header", v)}
-            editable={isEditing}
-            className="site-header"
-            style={{ color: content.accentColor }}
-            ariaLabel="Page header"
-            placeholder="Your page title"
-        />
-    );
-    const subheaderEditable = (
-        <Editable
-            tag="p"
-            value={content.subheader}
-            onChange={(v) => update("subheader", v)}
-            editable={isEditing}
-            className="site-subheader"
-            ariaLabel="Page subheader"
-            placeholder="A short line about you or this page"
-        />
-    );
 
     return (
         <>
@@ -619,30 +600,7 @@ export default function App() {
             {mode === "blocks" && (
             <main className={`site ${isEditing ? "is-editing" : ""}`} style={siteStyle}>
                 <article className="site-inner">
-                    {avatarBlock ? (
-                        <header className="profile-header">
-                            <BlockView
-                                key={avatarBlock.id}
-                                block={avatarBlock}
-                                accentColor={content.accentColor}
-                                editable={isEditing}
-                                onUpdate={(b) => updateBlock(avatarBlock.id, () => b)}
-                                onRemove={() => removeBlock(avatarBlock.id)}
-                                onUploadImage={uploadImage}
-                                maxStoreBytes={maxStoreBytes}
-                            />
-                            <div className="profile-header-text">
-                                {titleEditable}
-                                {subheaderEditable}
-                            </div>
-                        </header>
-                    ) : (
-                        <>
-                            {titleEditable}
-                            {subheaderEditable}
-                        </>
-                    )}
-                    {bodyBlocks.map((block) => (
+                    {content.blocks.map((block) => (
                         <BlockView
                             key={block.id}
                             block={block}
@@ -674,15 +632,6 @@ export default function App() {
                     </footer>
                 </article>
             </main>
-            )}
-
-            {undoPayload && (
-                <div className="toast" role="status" aria-live="polite">
-                    <span>
-                        Applied <strong>{undoPayload.templateName}</strong>
-                    </span>
-                    <button onClick={undoTemplate}>Undo</button>
-                </div>
             )}
 
             {/* Floating action bar — visible only in edit view; sits above the bottom nav pill. */}
@@ -831,6 +780,27 @@ export default function App() {
                                         )}
                                         onChange={(n) => update("fontSize", `${n}px`)}
                                     />
+                                    <div
+                                        className="font-size-row font-align-row"
+                                        role="group"
+                                        aria-label="Text alignment"
+                                    >
+                                        {(["left", "center"] as const).map((a) => (
+                                            <button
+                                                key={a}
+                                                className={
+                                                    (content.align ?? "left") === a
+                                                        ? "is-active"
+                                                        : ""
+                                                }
+                                                onClick={() =>
+                                                    update("align", a as TextAlign)
+                                                }
+                                            >
+                                                {a === "left" ? "Left" : "Center"}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
                             <span className="action-label" aria-hidden="true">
@@ -852,10 +822,16 @@ export default function App() {
                             </button>
                             {openMenu === "add" && (
                                 <div className="add-menu" role="menu">
+                                    <button onClick={() => addBlock("heading")}>
+                                        Heading
+                                    </button>
                                     <button onClick={() => addBlock("paragraph")}>
                                         Paragraph
                                     </button>
                                     <button onClick={() => addBlock("link")}>Link</button>
+                                    <button onClick={() => addBlock("button")}>
+                                        Button
+                                    </button>
                                     <button onClick={() => addBlock("image")}>Image</button>
                                     <button onClick={() => addBlock("divider")}>Divider</button>
                                 </div>
@@ -1178,7 +1154,7 @@ function modeDescription(target: EditorMode, current: EditorMode): string {
                 : "By converting back to Simple, you will lose changes made in HTML mode.";
         case "markdown":
             return current === "blocks"
-                ? "All simple layouts can be converted to Markdown."
+                ? "Text, links, and images convert to Markdown. Image sizing and button styling become plain."
                 : "By converting back to Markdown, you will lose changes made in HTML mode.";
         case "html":
             return current === "blocks"
@@ -1365,8 +1341,8 @@ function BlockView({
         }
     };
     return (
-        <div className={`block ${editable ? "is-editing" : ""} ${block.locked ? "is-locked" : ""}`}>
-            {editable && !block.locked && (
+        <div className={`block ${editable ? "is-editing" : ""}`}>
+            {editable && (
                 <button
                     className="block-remove"
                     onClick={onRemove}
@@ -1375,6 +1351,17 @@ function BlockView({
                 >
                     ×
                 </button>
+            )}
+            {block.type === "heading" && (
+                <Editable
+                    tag="h1"
+                    value={block.text}
+                    onChange={(text) => onUpdate({ ...block, text })}
+                    editable={editable}
+                    className="site-header"
+                    style={{ color: accentColor }}
+                    placeholder="Heading"
+                />
             )}
             {block.type === "paragraph" && (
                 <Editable
@@ -1435,61 +1422,20 @@ function BlockView({
                     )}
                 </p>
             )}
-            {block.type === "image" && block.variant === "avatar" && editable && (
-                <>
-                    <label className="avatar-upload" title="Change avatar">
-                        <input
-                            type="file"
-                            accept="image/*"
-                            disabled={uploading}
-                            onChange={async (e) => {
-                                const file = e.target.files?.[0];
-                                e.target.value = "";
-                                if (file) await handleFile(file);
-                            }}
-                        />
-                        {block.url && block.url !== "https://" ? (
-                            <img
-                                className="site-image is-avatar"
-                                src={block.url}
-                                alt={block.alt}
-                            />
-                        ) : (
-                            <div className="site-image-placeholder is-avatar">
-                                {uploading ? "Uploading…" : "Click to upload"}
-                            </div>
-                        )}
-                        {!uploading && block.url && block.url !== "https://" && (
-                            <span className="avatar-overlay" aria-hidden="true">
-                                Change
-                            </span>
-                        )}
-                    </label>
-                    {(uploading || uploadError) && (
-                        <div className="avatar-status">
-                            {uploading && uploadStatus && (
-                                <StepProgress
-                                    steps={UPLOAD_STEPS}
-                                    step={stepForUploadStatus(uploadStatus)}
-                                    status={uploadStatus}
-                                />
-                            )}
-                            {uploadError && (
-                                <pre className="image-upload-error">{uploadError}</pre>
-                            )}
-                        </div>
-                    )}
-                </>
-            )}
-            {block.type === "image" && block.variant === "avatar" && !editable && block.url && block.url !== "https://" && (
-                <img className="site-image is-avatar" src={block.url} alt={block.alt} />
-            )}
-            {block.type === "image" && block.variant !== "avatar" && (
+            {block.type === "image" && (
                 <>
                     {block.url && block.url !== "https://" ? (
-                        <img className="site-image" src={block.url} alt={block.alt} />
+                        <img
+                            className={`site-image is-${imageSize(block.variant)}`}
+                            src={block.url}
+                            alt={block.alt}
+                        />
                     ) : editable ? (
-                        <div className="site-image-placeholder">No image URL yet</div>
+                        <div
+                            className={`site-image-placeholder is-${imageSize(block.variant)}`}
+                        >
+                            No image yet — upload below
+                        </div>
                     ) : null}
                     {editable && (
                         <div className="image-controls">
@@ -1530,12 +1476,57 @@ function BlockView({
                             {uploadError && (
                                 <pre className="image-upload-error">{uploadError}</pre>
                             )}
+                            <VariantToggle
+                                label="Image size"
+                                options={[
+                                    { value: "small", name: "Small" },
+                                    { value: "medium", name: "Medium" },
+                                    { value: "large", name: "Large" },
+                                ]}
+                                value={imageSize(block.variant)}
+                                onChange={(variant) =>
+                                    onUpdate({
+                                        ...block,
+                                        variant: variant as ImageVariant,
+                                    })
+                                }
+                            />
                         </div>
                     )}
                 </>
             )}
             {block.type === "divider" && <hr className="site-divider" />}
         </div>
+    );
+}
+
+// Tiny segmented control for per-block style variants — what makes every
+// template block reproducible by hand (avatar images, button links).
+function VariantToggle({
+    label,
+    options,
+    value,
+    onChange,
+}: {
+    label: string;
+    options: { value: string; name: string }[];
+    value: string;
+    onChange: (value: string) => void;
+}) {
+    return (
+        <span className="variant-toggle" role="group" aria-label={label}>
+            {options.map((opt) => (
+                <button
+                    key={opt.value}
+                    type="button"
+                    className={value === opt.value ? "is-active" : ""}
+                    aria-pressed={value === opt.value}
+                    onClick={() => onChange(opt.value)}
+                >
+                    {opt.name}
+                </button>
+            ))}
+        </span>
     );
 }
 

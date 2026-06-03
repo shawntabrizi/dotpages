@@ -14,15 +14,16 @@ import {
     type SiteContent,
 } from "./template.ts";
 
-// Exact downgrade of the block model. Header/subheader become the leading
-// heading + paragraph; the profile layout's avatar treatment is the one thing
-// markdown can't express, so an avatar block becomes a plain image.
+// Downgrade of the block model. Content converts exactly, but markdown can't
+// express image sizing or pill-button styling, so those blocks become a plain
+// image and link.
 export function blocksToMarkdown(content: SiteContent): string {
     const parts: string[] = [];
-    if (content.header) parts.push(`# ${content.header}`);
-    if (content.subheader) parts.push(content.subheader);
     for (const b of content.blocks) {
         switch (b.type) {
+            case "heading":
+                parts.push(`# ${b.text}`);
+                break;
             case "paragraph":
                 parts.push(b.text);
                 break;
@@ -40,8 +41,8 @@ export function blocksToMarkdown(content: SiteContent): string {
     return parts.join("\n\n") + "\n";
 }
 
-// <title> comes from the first ATX heading, mirroring renderHtml's
-// `content.header || "hello"` fallback.
+// <title> comes from the first ATX heading, mirroring renderHtmlParts'
+// first-heading-block fallback.
 function titleFromMarkdown(markdown: string): string {
     const m = markdown.match(/^#{1,6}\s+(.+)$/m);
     return m ? m[1].trim() : "hello";

@@ -3,18 +3,24 @@
 // the result is a single byte blob we can hash and store in one
 // TransactionStorage.store call.
 
-export type ImageVariant = "default" | "avatar";
+/** Image sizes — always rendered centered. "small" is a round 256px pfp. */
+export type ImageVariant = "small" | "medium" | "large";
 export type LinkVariant = "default" | "pill";
+export type TextAlign = "left" | "center";
 
+// Every block is a regular, user-creatable component: anything a template
+// emits can be built by hand from a blank page, and edited or removed after.
+// The page title/description are heading/paragraph blocks like everything
+// else — there is no fixed header.
 export type Block =
-    | { id: string; type: "paragraph"; text: string; locked?: boolean }
+    | { id: string; type: "heading"; text: string }
+    | { id: string; type: "paragraph"; text: string }
     | {
           id: string;
           type: "link";
           label: string;
           url: string;
           variant?: LinkVariant;
-          locked?: boolean;
       }
     | {
           id: string;
@@ -22,15 +28,10 @@ export type Block =
           url: string;
           alt: string;
           variant?: ImageVariant;
-          locked?: boolean;
       }
-    | { id: string; type: "divider"; locked?: boolean };
-
-export type Layout = "default" | "profile";
+    | { id: string; type: "divider" };
 
 export interface SiteContent {
-    header: string;
-    subheader: string;
     accentColor: string;
     background: string;
     fontFamily: string;
@@ -38,17 +39,31 @@ export interface SiteContent {
     fontSize?: string;
     /** Body text color. Unset = auto-picked for WCAG contrast against the background. */
     textColor?: string;
-    layout?: Layout;
+    /** Page text alignment. Unset = left. */
+    align?: TextAlign;
     blocks: Block[];
 }
 
+// Normalize an image block's size, mapping legacy variants ("avatar" → small,
+// "default"/unset → large) so old drafts keep rendering.
+export function imageSize(variant?: string): ImageVariant {
+    if (variant === "small" || variant === "avatar") return "small";
+    if (variant === "medium") return "medium";
+    return "large";
+}
+
 export const DEFAULT_CONTENT: SiteContent = {
-    header: "Hello, world",
-    subheader: "This is your page. Click anything to make it yours.",
     accentColor: "#e6007a",
     background: "#0b0d12",
     fontFamily: "system-ui",
-    blocks: [],
+    blocks: [
+        { id: "default-heading", type: "heading", text: "Hello, world" },
+        {
+            id: "default-paragraph",
+            type: "paragraph",
+            text: "This is your page. Click anything to make it yours.",
+        },
+    ],
 };
 
 export const DEFAULT_FONT_SIZE = "16px";
@@ -112,6 +127,8 @@ function safeUrl(raw: string): string {
 
 function renderBlock(block: Block): string {
     switch (block.type) {
+        case "heading":
+            return `<h1>${escapeHtml(block.text)}</h1>`;
         case "paragraph":
             return `<p>${escapeHtml(block.text)}</p>`;
         case "link": {
@@ -119,7 +136,8 @@ function renderBlock(block: Block): string {
             return `<p${wrap}><a href="${safeUrl(block.url)}" target="_blank" rel="noopener">${escapeHtml(block.label)}</a></p>`;
         }
         case "image": {
-            const cls = block.variant === "avatar" ? ' class="avatar"' : "";
+            const size = imageSize(block.variant);
+            const cls = size === "large" ? "" : ` class="img-${size}"`;
             return `<img${cls} src="${safeUrl(block.url)}" alt="${escapeHtml(block.alt)}">`;
         }
         case "divider":
@@ -135,12 +153,13 @@ export interface PageTheme {
     fontFamily: string;
     fontSize?: string;
     textColor?: string;
+    align?: TextAlign;
 }
 
 // Optional CSS chunks, keyed by feature. Only the chunks a page actually uses
 // are emitted — keeps layout-specific rules from bleeding into the document
 // handed to the raw-HTML editor, and trims bytes off the deploy artifact.
-export type ShellFeature = "subheader" | "markdown" | "avatar" | "pill" | "profile";
+export type ShellFeature = "markdown" | "img-small" | "img-medium" | "pill";
 
 interface FeatureCssContext {
     accent: string;
@@ -149,7 +168,6 @@ interface FeatureCssContext {
 }
 
 const FEATURE_CSS: Record<ShellFeature, (ctx: FeatureCssContext) => string> = {
-    subheader: () => `.subheader { margin: 0 0 32px; font-size: 18px; opacity: 0.85; }`,
     markdown: ({ accent, divider }) => `h2, h3 { letter-spacing: -0.01em; line-height: 1.2; margin: 32px 0 12px; }
 h2 { font-size: 28px; }
 h3 { font-size: 22px; }
@@ -159,13 +177,13 @@ blockquote { margin: 0 0 16px; padding-left: 16px; border-left: 3px solid ${acce
 code { font-family: ui-monospace, Menlo, monospace; font-size: 0.9em; background: ${divider}; padding: 2px 5px; border-radius: 4px; }
 pre { margin: 0 0 16px; padding: 16px; background: ${divider}; border-radius: 12px; overflow-x: auto; }
 pre code { background: none; padding: 0; }`,
-    avatar: () => `img.avatar {
-    width: 160px; height: 160px;
-    border-radius: 50%;
+    "img-small": () => `img.img-small {
+    width: min(256px, 100%);
+    aspect-ratio: 1;
     object-fit: cover;
-    margin: 24px auto;
-    display: block;
+    border-radius: 50%;
 }`,
+    "img-medium": () => `img.img-medium { width: min(512px, 100%); }`,
     pill: ({ accent, accentContrast }) => `p.pill { text-align: center; margin: 20px 0; }
 p.pill a {
     display: inline-block;
@@ -176,20 +194,6 @@ p.pill a {
     border-radius: 12px;
     text-decoration: none;
     font-weight: 600;
-}`,
-    profile: () => `.profile-header {
-    display: flex;
-    align-items: center;
-    gap: 24px;
-    margin: 0 0 32px;
-}
-.profile-header img.avatar { margin: 0; flex-shrink: 0; }
-.profile-header-text { flex: 1; min-width: 0; }
-.profile-header-text h1 { margin: 0 0 8px; }
-.profile-header-text .subheader { margin: 0; }
-@media (max-width: 480px) {
-    .profile-header { flex-direction: column; text-align: center; gap: 16px; }
-    .profile-header img.avatar { margin: 0 auto; }
 }`,
 };
 
@@ -202,6 +206,7 @@ export function shellCss(theme: PageTheme, features: readonly ShellFeature[] = [
     const colors = siteColors(theme.background);
     const fontSize = theme.fontSize ? escapeHtml(theme.fontSize) : DEFAULT_FONT_SIZE;
     const foreground = theme.textColor ? escapeHtml(theme.textColor) : colors.foreground;
+    const align = theme.align === "center" ? "\n    text-align: center;" : "";
     const accentContrast = siteColors(theme.accentColor).foreground;
     const featureCss = features
         .map((f) => FEATURE_CSS[f]({ accent, accentContrast, divider: colors.divider }))
@@ -216,7 +221,7 @@ body {
     color: ${foreground};
     font-family: ${font};
     font-size: ${fontSize};
-    line-height: 1.5;
+    line-height: 1.5;${align}
 }
 main { max-width: 640px; margin: 0 auto; }
 h1 {
@@ -230,7 +235,7 @@ h1 {
 p { margin: 0 0 16px; }
 a { color: ${accent}; text-decoration: underline; text-underline-offset: 3px; }
 a:hover { opacity: 0.8; }
-img { max-width: 100%; height: auto; border-radius: 12px; margin: 16px 0; }
+img { display: block; max-width: 100%; height: auto; border-radius: 12px; margin: 16px auto; }
 hr { border: 0; border-top: 1px solid ${colors.divider}; margin: 32px 0; }
 footer { margin-top: 64px; opacity: 0.4; font-size: 12px; }
 ${featureCss}`;
@@ -276,41 +281,22 @@ export function wrapMain(inner: string): string {
 }
 
 export function renderHtmlParts(content: SiteContent): DocumentParts {
-    // Profile layout: lift the first avatar block out of the body and put it
-    // beside the header/subheader in a two-column row. Falls back to default
-    // single-column flow if no avatar block is found.
-    const isProfile = content.layout === "profile";
-    const avatarIdx = isProfile
-        ? content.blocks.findIndex((b) => b.type === "image" && b.variant === "avatar")
-        : -1;
-    const avatarBlock = avatarIdx >= 0 ? content.blocks[avatarIdx] : null;
-    const bodyBlocks = avatarBlock
-        ? content.blocks.filter((_, i) => i !== avatarIdx)
-        : content.blocks;
-    const blocks = bodyBlocks.map(renderBlock).join("\n        ");
+    const blocks = content.blocks.map(renderBlock).join("\n    ");
 
-    const headerHtml = avatarBlock
-        ? `<header class="profile-header">
-        ${renderBlock(avatarBlock)}
-        <div class="profile-header-text">
-            <h1>${escapeHtml(content.header)}</h1>
-            <p class="subheader">${escapeHtml(content.subheader)}</p>
-        </div>
-    </header>`
-        : `<h1>${escapeHtml(content.header)}</h1>
-    <p class="subheader">${escapeHtml(content.subheader)}</p>`;
-
-    const features: ShellFeature[] = ["subheader"];
-    if (content.blocks.some((b) => b.type === "image" && b.variant === "avatar"))
-        features.push("avatar");
+    const features: ShellFeature[] = [];
+    const sizes = content.blocks
+        .filter((b) => b.type === "image")
+        .map((b) => imageSize((b as { variant?: string }).variant));
+    if (sizes.includes("small")) features.push("img-small");
+    if (sizes.includes("medium")) features.push("img-medium");
     if (content.blocks.some((b) => b.type === "link" && b.variant === "pill"))
         features.push("pill");
-    if (avatarBlock) features.push("profile");
 
+    const firstHeading = content.blocks.find((b) => b.type === "heading");
     return {
-        title: escapeHtml(content.header || "hello"),
+        title: escapeHtml(firstHeading?.text || "hello"),
         css: shellCss(content, features),
-        bodyHtml: wrapMain(`${headerHtml}\n    ${blocks}`),
+        bodyHtml: wrapMain(blocks),
     };
 }
 
