@@ -277,10 +277,12 @@ export default function App() {
     const effectiveLabel = domain.trim().replace(/\.dot$/i, "") || autoLabel || "";
 
     // Intentionally narrow deps: derive once, on the first visit to the
-    // deploy view, from whatever the content is at that moment.
+    // deploy view, from whatever the content is at that moment. Seed from
+    // the page's <h1> text (uniform across all three modes) — NOT the raw
+    // document, whose first bytes are doctype boilerplate.
     useEffect(() => {
         if (view === "deploy" && !autoLabel) {
-            setAutoLabel(deriveDomain(currentHtml().slice(0, 64)));
+            setAutoLabel(deriveDomain(titleFromHtml(currentHtml())));
         }
     }, [view, autoLabel]); // eslint-disable-line react-hooks/exhaustive-deps
 
