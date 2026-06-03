@@ -55,12 +55,13 @@ type ActionMenu = "layout" | "colors" | "font" | "add" | "mode";
 type HtmlPane = "html" | "css" | "js";
 const PANE_GLYPHS: Record<HtmlPane, string> = { html: "<>", css: "{}", js: "JS" };
 
-// <title> for assembled pane documents: first <h1>'s text, falling back to
-// the same default the blocks renderer uses. The h1 markup is already
-// entity-encoded, so the result is safe for <title> once tags are stripped.
+// <title> for assembled pane documents and the auto-name seed: the first
+// <h1>–<h3>'s text in document order, falling back to the same default the
+// blocks renderer uses. The heading markup is already entity-encoded, so the
+// result is safe for <title> once tags are stripped.
 function titleFromHtml(body: string): string {
-    const m = body.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-    const text = m ? m[1].replace(/<[^>]*>/g, "").trim() : "";
+    const m = body.match(/<(h[1-3])[^>]*>([\s\S]*?)<\/\1>/i);
+    const text = m ? m[2].replace(/<[^>]*>/g, "").trim() : "";
     return text || "hello";
 }
 type DeployResult = DeploySuccess;
