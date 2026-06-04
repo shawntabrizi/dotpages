@@ -5,7 +5,6 @@
 // once the deploy path is fully wired.
 
 import { useSyncExternalStore } from "react";
-import { enumValue, getTruApi } from "@parity/product-sdk-host";
 import { AllocatableResource, AllocationOutcome, type CodecType } from "@novasamatech/host-api";
 import {
     AccountNotFoundError,
@@ -13,6 +12,7 @@ import {
     SigningFailedError,
     err,
     ok,
+    type ConnectContext,
     type Result,
     type SignerAccount,
     type SignerError,
@@ -91,6 +91,11 @@ class ProductAccountSignerManager {
     private readonly manager = new SignerManager({
         dappName: this.productAccountIdentifier,
         ss58Prefix: 42,
+        // Fires once per transition into "connected" (and again after an
+        // auto-reconnect) — the SDK-sanctioned place to request resource
+        // grants. Replaces the old getTruApi().requestResourceAllocation
+        // call we made manually after connect.
+        onConnect: (_account, ctx) => this.runResourceAllocation(ctx),
     });
     private readonly signerSubs = new Set<(state: SignerState) => void>();
     private readonly resourceSubs = new Set<(state: ResourceAllocationState) => void>();
@@ -184,62 +189,36 @@ class ProductAccountSignerManager {
             activeProvider: "host",
             error: null,
         });
-        // Background — sign calls before completion may trigger an extra
-        // host prompt; that's the same trade-off the template makes.
-        void this.requestResourceAllocation();
+        // Resource allocation runs via the SignerManager onConnect callback.
         return ok([selected]);
     }
 
-    async requestResourceAllocation(): Promise<ResourceAllocationState> {
+    private async runResourceAllocation(ctx: ConnectContext): Promise<void> {
         this.setResourceState({
             status: "requesting",
             entries: INITIAL_RESOURCE_ENTRIES,
             error: null,
         });
-
-        const truApi = await getTruApi();
-        if (!truApi?.requestResourceAllocation) {
-            const next: ResourceAllocationState = {
-                status: "unavailable",
-                entries: INITIAL_RESOURCE_ENTRIES,
-                error: "Host does not expose requestResourceAllocation",
-            };
-            this.setResourceState(next);
-            return next;
-        }
-
         try {
-            const response = await truApi.requestResourceAllocation(
-                enumValue("v1", [...RESOURCE_ALLOCATION_REQUESTS]),
-            );
-            if (response.isErr()) {
-                const next: ResourceAllocationState = {
-                    status: "error",
-                    entries: INITIAL_RESOURCE_ENTRIES,
-                    error: response.error.value.message,
-                };
-                this.setResourceState(next);
-                return next;
-            }
-            const outcomes = response.value.value;
-            const next: ResourceAllocationState = {
+            const outcomes = await ctx.requestResourceAllocation([
+                ...RESOURCE_ALLOCATION_REQUESTS,
+            ]);
+            if (ctx.signal.aborted) return;
+            this.setResourceState({
                 status: "complete",
                 entries: RESOURCE_ALLOCATION_REQUESTS.map((request, i) => ({
                     resource: request.tag,
                     outcome: outcomes[i]?.tag ?? "NotAvailable",
                 })),
                 error: null,
-            };
-            this.setResourceState(next);
-            return next;
+            });
         } catch (cause) {
-            const next: ResourceAllocationState = {
+            if (ctx.signal.aborted) return;
+            this.setResourceState({
                 status: "error",
                 entries: INITIAL_RESOURCE_ENTRIES,
                 error: cause instanceof Error ? cause.message : String(cause),
-            };
-            this.setResourceState(next);
-            return next;
+            });
         }
     }
 
