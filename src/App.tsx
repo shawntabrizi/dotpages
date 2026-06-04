@@ -39,7 +39,7 @@ import {
     tryExtensionAccount,
 } from "./account.ts";
 import { MAX_TX_BYTES } from "./lib/bulletin/limits.ts";
-import { DOT_HOST, PAS_FAUCET_URL } from "./lib/polkadot/constants.ts";
+import { BULLETIN_FAUCET_URL, DOT_HOST, PAS_FAUCET_URL } from "./lib/polkadot/constants.ts";
 import { MAX_IMAGE_DIMENSION, resizeImageToFit } from "./image-resize.ts";
 import { TEMPLATES, type Template } from "./templates.ts";
 import {
@@ -235,7 +235,12 @@ export default function App() {
     const [extensionAccount, setExtensionAccount] = useState<ActiveAccount | null>(null);
     const [resolvingOwned, setResolvingOwned] = useState(true);
     const [ownedError, setOwnedError] = useState<string | null>(null);
+    /** Advisory remaining byte allowance — null when unknown, N/A (host
+     *  route), or non-positive (the soft counters never gate anyway). */
     const [maxStoreBytes, setMaxStoreBytes] = useState<number | null>(null);
+    /** Distinct from the budget: false = CHECKED and unauthorized (direct
+     *  route would fail) — fail fast with the faucet link. null = unknown. */
+    const [bulletinAuthorized, setBulletinAuthorized] = useState<boolean | null>(null);
 
     const devAccount = useMemo(() => getDevAccount(), []);
     const activeAccount: ActiveAccount | null = useDevAccount
@@ -294,6 +299,7 @@ export default function App() {
         // authorization (and no Bulletin RPC connection) needed.
         if (!address || activeAccount?.source === "host") {
             setMaxStoreBytes(null);
+            setBulletinAuthorized(null);
             return;
         }
         let cancelled = false;
@@ -301,13 +307,17 @@ export default function App() {
             .then(({ checkBulletinAuthorization }) => checkBulletinAuthorization(address))
             .then((auth) => {
                 if (cancelled) return;
+                setBulletinAuthorized(auth.authorized);
                 const remaining = auth.bytesAllowance - auth.bytesUsed;
                 setMaxStoreBytes(
-                    auth.authorized ? Number(remaining > 0n ? remaining : 0n) : 0,
+                    auth.authorized && remaining > 0n ? Number(remaining) : null,
                 );
             })
             .catch(() => {
-                if (!cancelled) setMaxStoreBytes(null);
+                if (!cancelled) {
+                    setMaxStoreBytes(null);
+                    setBulletinAuthorized(null);
+                }
             });
         return () => {
             cancelled = true;
@@ -571,12 +581,22 @@ export default function App() {
                 "Sign in first — pick //Bob in the Deploy panel, or connect a wallet.",
             );
         }
+        // Checked-and-unauthorized fails fast with the faucet link, BEFORE
+        // the user sits through image optimization for a store that must
+        // fail. (null = unknown/host route — proceed and let the deploy path
+        // verify; an exhausted-but-valid allowance is also not a failure,
+        // the soft counters only deprioritize.)
+        if (activeAccount.source !== "host" && bulletinAuthorized === false) {
+            throw new Error(
+                `No Bulletin storage authorization for ${activeAccount.displayName}.\n\n` +
+                    `Self-serve faucet:\n${BULLETIN_FAUCET_URL}`,
+            );
+        }
         // Every upload is optimized: downscaled to the largest dimension the
         // page can display (1280px) and re-encoded — images that already fit
         // pass through untouched. The byte budget is the smaller of the chain's
-        // per-tx cap and the account authorization (chain cap even when the
-        // auth query failed).
-        const chainLimit = Math.min(MAX_TX_BYTES, maxStoreBytes || MAX_TX_BYTES);
+        // per-tx cap and the remaining allowance (chain cap when unknown).
+        const chainLimit = Math.min(MAX_TX_BYTES, maxStoreBytes ?? MAX_TX_BYTES);
         // The host signing channel rejects large payloads with an opaque
         // "message too big" — the limit isn't published anywhere we can
         // query, and it's far below the chain's 2 MiB cap. Host-signed
@@ -1118,7 +1138,7 @@ export default function App() {
                     onUpload={(file) => startImageUpload(editingBlock.id, file)}
                     uploadStatus={uploads[editingBlock.id] ?? null}
                     uploadError={uploadErrors[editingBlock.id] ?? null}
-                    maxStoreBytes={Math.min(MAX_TX_BYTES, maxStoreBytes || MAX_TX_BYTES)}
+                    maxStoreBytes={Math.min(MAX_TX_BYTES, maxStoreBytes ?? MAX_TX_BYTES)}
                 />
             )}
 
