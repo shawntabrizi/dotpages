@@ -8,6 +8,7 @@ import {
     assembleDocument,
     escapeHtml,
     shellCss,
+    validateUrl,
     wrapMain,
     type DocumentParts,
     type PageTheme,
@@ -19,6 +20,19 @@ import {
 // (entity references) so converted text keeps meaning what it meant in
 // blocks mode; backslash escapes stay readable in the markdown editor.
 const escapeMarkdownText = (s: string): string => s.replace(/[<&]/g, (c) => `\\${c}`);
+
+// Link labels / image alt additionally escape square brackets so the text
+// can't terminate or nest the surrounding link structure.
+const escapeMarkdownLabel = (s: string): string =>
+    escapeMarkdownText(s).replace(/[[\]]/g, (c) => `\\${c}`);
+
+// URLs go through the SAME allowlist the renderers use, so a javascript:
+// link that rendered inert ("#") in blocks mode stays inert after the mode
+// switch instead of becoming an active href. CommonMark's <...> destination
+// form tolerates spaces and parentheses; literal angle brackets inside the
+// URL are percent-encoded since that form can't contain them.
+const markdownUrl = (raw: string): string =>
+    `<${validateUrl(raw).replace(/</g, "%3C").replace(/>/g, "%3E")}>`;
 
 // Downgrade of the block model. Content converts exactly, but markdown can't
 // express image sizing or pill-button styling, so those blocks become a plain
@@ -34,10 +48,10 @@ export function blocksToMarkdown(content: SiteContent): string {
                 parts.push(escapeMarkdownText(b.text));
                 break;
             case "link":
-                parts.push(`[${escapeMarkdownText(b.label)}](${b.url})`);
+                parts.push(`[${escapeMarkdownLabel(b.label)}](${markdownUrl(b.url)})`);
                 break;
             case "image":
-                parts.push(`![${escapeMarkdownText(b.alt)}](${b.url})`);
+                parts.push(`![${escapeMarkdownLabel(b.alt)}](${markdownUrl(b.url)})`);
                 break;
             case "divider":
                 parts.push("---");
