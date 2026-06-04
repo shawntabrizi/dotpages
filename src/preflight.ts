@@ -257,7 +257,7 @@ export async function runPreflight(params: {
     const [bulletin, name, funds, mapped] = await Promise.all([
         bulletinCheck().catch(() => verifyLater("bulletin", "Bulletin storage")),
         nameCheck().catch(() => verifyLater("name", ".dot name")),
-        fundsCheck().catch(() => verifyLater("funds", "Transaction fees")),
+        fundsCheck().catch(() => verifyLater("funds", "Funds")),
         mappedCheck().catch(() => verifyLater("mapped", "Account setup")),
     ]);
 
