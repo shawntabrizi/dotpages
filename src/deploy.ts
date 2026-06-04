@@ -33,6 +33,14 @@ export type StatusFn = (message: string) => void;
 
 // ── Common helpers ──────────────────────────────────────────────────────────
 
+// Latin letters that DON'T decompose to base+combining under NFD, so the
+// diacritic strip can't reach them. Non-Latin scripts (Cyrillic, CJK, …)
+// have no cheap transliteration and fall through to the "hello" fallback.
+const LATIN_SPECIALS: Record<string, string> = {
+    ø: "o", ß: "ss", æ: "ae", œ: "oe", đ: "d", ð: "d", ħ: "h",
+    ł: "l", ŋ: "n", þ: "th", ŧ: "t", ı: "i", ĸ: "k",
+};
+
 // Auto-derive a NoStatus-shape label from the rendered header text. Matches
 // `dot decentralize`'s rule: base ≥9 + exactly 2 trailing digits → NoStatus.
 export function deriveDomain(seed: string): string {
@@ -40,7 +48,8 @@ export function deriveDomain(seed: string): string {
         .normalize("NFD")
         .replace(/[̀-ͯ]/g, "") // strip diacritics: café → cafe, not caf-
         .toLowerCase()
-        .replace(/['’`´]/g, "") // sveta's → svetas, not sveta-s
+        .replace(/[øßæœđðħłŋþŧıĸ]/g, (c) => LATIN_SPECIALS[c] ?? c)
+        .replace(/['’‘`´ʼ]/g, "") // sveta's → svetas, not sveta-s
         .replace(/[^a-z0-9-]/g, "-")
         .replace(/-+/g, "-")
         .replace(/^-+|-+$/g, "");
