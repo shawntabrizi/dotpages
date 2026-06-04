@@ -38,7 +38,9 @@ export function getDevAccount(): ActiveAccount {
     return {
         source: "dev",
         address: ss58Encode(getDevPublicKey(DEV_ACCOUNT_NAME)),
-        displayName: `${DEV_ACCOUNT_NAME} (dev)`,
+        // Deliberately not the derivation name — it's a throwaway dev key,
+        // and surfacing a human name ("Bob") reads like a real account.
+        displayName: "Dev account",
         signer: createDevSigner(DEV_ACCOUNT_NAME),
     };
 }

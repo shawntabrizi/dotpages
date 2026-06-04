@@ -613,7 +613,7 @@ export default function App() {
     ): Promise<string> => {
         if (!activeAccount) {
             throw new Error(
-                "Sign in first — pick //Bob in the Deploy panel, or connect a wallet.",
+                "Sign in first — tick the dev account in the Deploy panel, or connect a wallet.",
             );
         }
         // Checked-and-unauthorized fails fast with the faucet link, BEFORE
@@ -714,7 +714,7 @@ export default function App() {
             if (account) setExtensionAccount(account);
             else
                 setOwnedError(
-                    "No browser wallet found. Install Talisman, SubWallet, or Polkadot.js — or untick the box to deploy as //Bob.",
+                    "No browser wallet found. Install Talisman, SubWallet, or Polkadot.js — or tick the dev account checkbox.",
                 );
         } catch (cause) {
             setOwnedError(cause instanceof Error ? cause.message : String(cause));
@@ -1184,16 +1184,29 @@ export default function App() {
 
                     <div className="deploy-field">
                         <span className="field-label">Account</span>
-                        <span className="account-chip">
-                            <span
-                                className={`source-dot source-${activeAccount?.source ?? "none"}`}
-                            />
-                            {activeAccount
-                                ? `${activeAccount.displayName} (${activeAccount.source})`
-                                : resolvingOwned
-                                  ? "connecting…"
-                                  : "no signer"}
-                        </span>
+                        <div className="account-row">
+                            <span className="account-chip">
+                                <span
+                                    className={`source-dot source-${activeAccount?.source ?? "none"}`}
+                                />
+                                {activeAccount
+                                    ? activeAccount.source === "dev"
+                                        ? activeAccount.displayName
+                                        : `${activeAccount.displayName} (${activeAccount.source})`
+                                    : resolvingOwned
+                                      ? "connecting…"
+                                      : "no signer"}
+                            </span>
+                            <label className="checkbox" title="Throwaway local signer — no wallet needed">
+                                <input
+                                    type="checkbox"
+                                    checked={useDevAccount}
+                                    onChange={(e) => setUseDevAccount(e.target.checked)}
+                                    disabled={busy}
+                                />
+                                <span>Dev account</span>
+                            </label>
+                        </div>
                         {activeAccount && (
                             <button
                                 type="button"
@@ -1233,21 +1246,6 @@ export default function App() {
                                 or tick the dev option below.
                             </p>
                         )}
-                        <label className="checkbox">
-                            <input
-                                type="checkbox"
-                                checked={useDevAccount}
-                                onChange={(e) => setUseDevAccount(e.target.checked)}
-                                disabled={busy}
-                            />
-                            <span>
-                                Use the //Bob dev account
-                                <span className="checkbox-hint">
-                                    {" "}
-                                    — local testing without a wallet
-                                </span>
-                            </span>
-                        </label>
                         {ownedError && <p className="hint subtle">{ownedError}</p>}
                     </div>
 

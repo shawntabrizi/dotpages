@@ -781,6 +781,16 @@ body {
 .field input[type="text"]:focus { outline: 0; border-color: var(--accent); }
 .field input[type="text"]:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* Chip + dev-account toggle share a row; wraps on narrow screens. */
+.account-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.account-row .checkbox { flex: 0 0 auto; }
+
 .account-chip {
     display: inline-flex;
     align-items: center;
