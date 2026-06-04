@@ -129,13 +129,22 @@ export function siteColors(background: string): SiteColors {
 // into the produced page. http(s), mailto/tel, and relative paths only —
 // the templates themselves ship "Email me" mailto: links, so those must
 // survive the render (they used to fall through to "#").
-function safeUrl(raw: string): string {
+/**
+ * Allowlist validation only — returns the RAW url (or "#" when rejected).
+ * Use this from React (which escapes attributes itself); use safeUrl when
+ * interpolating into an HTML string.
+ */
+export function validateUrl(raw: string): string {
     const v = raw.trim();
     if (!v) return "#";
-    if (/^https?:\/\//i.test(v)) return escapeHtml(v);
-    if (/^(mailto|tel):/i.test(v)) return escapeHtml(v);
-    if (v.startsWith("/") || v.startsWith("./") || v.startsWith("#")) return escapeHtml(v);
+    if (/^https?:\/\//i.test(v)) return v;
+    if (/^(mailto|tel):/i.test(v)) return v;
+    if (v.startsWith("/") || v.startsWith("./") || v.startsWith("#")) return v;
     return "#";
+}
+
+function safeUrl(raw: string): string {
+    return escapeHtml(validateUrl(raw));
 }
 
 // Images additionally accept data:image/* — safe in an <img> src and in the

@@ -15,6 +15,7 @@ import {
     imageShape,
     imageSize,
     siteColors,
+    validateUrl,
     type Block,
     type ImageShape,
     type ImageVariant,
@@ -1710,7 +1711,11 @@ function BlockView({
                         </span>
                     ) : (
                         <a
-                            href={block.url}
+                            // Same allowlist as the deployed artifact: the
+                            // preview runs in the APP origin (which holds the
+                            // signer), so a typed javascript: URL must be as
+                            // inert here as it is in the artifact.
+                            href={validateUrl(block.url)}
                             target="_blank"
                             rel="noopener"
                             className="site-link"
