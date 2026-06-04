@@ -6,7 +6,12 @@ import type { PolkadotSigner } from "polkadot-api";
 import { DOTNS_CONTRACTS, NATIVE_TO_ETH_RATIO } from "../polkadot/constants.ts";
 import { POP_RULES_ABI, REGISTRAR_CONTROLLER_ABI, REGISTRY_ABI } from "./abis.ts";
 import { labelToFullName, namehash } from "./namehash.ts";
-import { dryRunContractCall, ensureAccountMapped, submitContractCall } from "./contracts.ts";
+import {
+    assertDryRunOk,
+    dryRunContractCall,
+    ensureAccountMapped,
+    submitContractCall,
+} from "./contracts.ts";
 
 function generateSecret(): `0x${string}` {
     const bytes = crypto.getRandomValues(new Uint8Array(32));
@@ -213,6 +218,7 @@ export async function commitDomain(params: {
         signerAddress,
         commitData,
     );
+    assertDryRunOk(commitGas, "Commitment");
     await submitContractCall(
         DOTNS_CONTRACTS.registrarController,
         signer,
@@ -263,6 +269,10 @@ export async function finishRegistration(params: {
         registerData,
         bufferedNative,
     );
+    // The expensive gate: a register that would revert must not be paid for.
+    // The commitment is NOT consumed by this stop — it stays valid until
+    // maxCommitmentAge, so a retry after fixing the cause still works.
+    assertDryRunOk(registerGas, "Registration");
     await submitContractCall(
         DOTNS_CONTRACTS.registrarController,
         signer,

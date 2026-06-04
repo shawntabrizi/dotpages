@@ -4,6 +4,7 @@
 // Patterns adapted from dotdot-deployer. The 4x gas multiplier + minimum
 // 2 PAS storage deposit defaults are inherited from the DotNS SDK reference.
 
+import { decodeAbiParameters } from "viem";
 import { Binary, type PolkadotSigner } from "polkadot-api";
 import { getAssetHubClient } from "../polkadot/clients.ts";
 import { submitAndWait, type DeployStatus } from "../bulletin/submit-and-wait.ts";
@@ -162,6 +163,43 @@ export async function dryRunContractCall(
         storageDeposit: chargedStorageDeposit(r.storage_deposit),
         returnData: bytesToHex(r.result?.value?.data),
     };
+}
+
+/**
+ * Best-effort human form of a reverted dry-run's return data. Solidity
+ * `revert("reason")` encodes as Error(string) (selector 0x08c379a0);
+ * anything else is surfaced as raw hex so it's at least greppable.
+ */
+export function describeRevert(returnData: `0x${string}`): string {
+    if (returnData.startsWith("0x08c379a0")) {
+        try {
+            const [reason] = decodeAbiParameters(
+                [{ type: "string" }],
+                `0x${returnData.slice(10)}` as `0x${string}`,
+            );
+            return reason as string;
+        } catch {
+            // fall through to raw hex
+        }
+    }
+    return returnData === "0x" ? "no revert data" : returnData;
+}
+
+/**
+ * Gate a paid submission on its dry-run: a COMPLETED dry-run that reports
+ * failure means the chain will revert the real call — submitting anyway
+ * burns fees for a guaranteed failure. (A dry-run that THROWS — transport
+ * failure — propagates from dryRunContractCall before reaching this point,
+ * which is the correct distinction: don't pay for known reverts, but don't
+ * let this helper be the place that swallows RPC errors either.)
+ */
+export function assertDryRunOk(
+    result: DryRunResult,
+    what: string,
+): asserts result is DryRunResult & { success: true } {
+    if (!result.success) {
+        throw new Error(`${what} would revert — not submitting. ${describeRevert(result.returnData)}`);
+    }
 }
 
 export async function submitContractCall(

@@ -7,7 +7,12 @@ import { encode as encodeContentHash } from "@ensdomains/content-hash";
 import { DOTNS_CONTRACTS } from "../polkadot/constants.ts";
 import { CONTENT_RESOLVER_ABI } from "./abis.ts";
 import { labelToFullName, namehash } from "./namehash.ts";
-import { dryRunContractCall, ensureAccountMapped, submitContractCall } from "./contracts.ts";
+import {
+    assertDryRunOk,
+    dryRunContractCall,
+    ensureAccountMapped,
+    submitContractCall,
+} from "./contracts.ts";
 
 export function encodeIpfsContenthash(cidString: string): `0x${string}` {
     const encoded = encodeContentHash("ipfs", cidString);
@@ -41,14 +46,18 @@ export async function setContentHash(params: {
         encoded,
     );
 
+    // A failed estimate previously fell back to default gas and submitted
+    // anyway — paying fees for a guaranteed revert. Stop instead.
+    assertDryRunOk(gasEstimate, "setContenthash");
+
     onStatus?.("Setting content hash…");
     await submitContractCall(
         DOTNS_CONTRACTS.contentResolver,
         signer,
         encoded,
         0n,
-        gasEstimate.success ? gasEstimate.gasConsumed : undefined,
-        gasEstimate.success ? gasEstimate.storageDeposit : undefined,
+        gasEstimate.gasConsumed,
+        gasEstimate.storageDeposit,
         (status) => {
             if (status === "signing") onStatus?.("Signing content hash update…");
             if (status === "in-block") onStatus?.("Content hash set");
