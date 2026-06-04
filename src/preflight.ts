@@ -198,35 +198,34 @@ export async function runPreflight(params: {
     // ── funds: host allowance, or on-chain balance for extension/dev ────
     let freeNative: bigint | null = null;
     const fundsCheck = async (): Promise<PreflightCheck> => {
-        if (account.source === "host") {
-            // Host-mediated transactions are fee-sponsored (AsPgas) — the
-            // ChainSubmit permission prompt at deploy time is the real gate,
-            // and there's no API to pre-query it.
-            return {
-                id: "funds",
-                label: "Transaction fees",
-                state: "ok",
-                detail: "Sponsored by the host",
-                link: null,
-            };
-        }
+        // Host-mediated transactions are FEE-sponsored (AsPgas), but the
+        // domain price and pallet-revive storage deposits are value
+        // transfers from the account's own balance — empirically the host
+        // does NOT cover those (register dispatches Revive::TransferFailed
+        // on an unfunded product account). So every source needs a balance;
+        // only the wording differs.
         const { api } = getAssetHubClient();
         const info = await api.query.System.Account.getValue(account.address);
         freeNative = info.data.free;
         if (freeNative === 0n) {
             return {
                 id: "funds",
-                label: "Transaction fees",
+                label: "Funds",
                 state: "fail",
-                detail: `${account.displayName} has no PAS on Asset Hub`,
+                detail:
+                    account.source === "host"
+                        ? `The product account has no PAS — fees are host-sponsored, but the domain price and deposits are paid from it. Send PAS to the account address above`
+                        : `${account.displayName} has no PAS on Asset Hub`,
                 link: PAS_FAUCET_URL,
             };
         }
         return {
             id: "funds",
-            label: "Transaction fees",
+            label: "Funds",
             state: "ok",
-            detail: `${formatPas(freeNative)} free on Asset Hub`,
+            detail:
+                `${formatPas(freeNative)} free on Asset Hub` +
+                (account.source === "host" ? " (fees host-sponsored)" : ""),
             link: null,
         };
     };
@@ -252,10 +251,11 @@ export async function runPreflight(params: {
         mappedCheck().catch(() => verifyLater("mapped", "Account setup")),
     ]);
 
-    // Cross-check once both sides are known: balance vs price + headroom.
+    // Cross-check once both sides are known: balance vs price + headroom
+    // (deposits dominate the margin; host fee sponsorship doesn't change it
+    // much since fees are the smallest component).
     if (
         funds.state === "ok" &&
-        account.source !== "host" &&
         priceNative !== null &&
         freeNative !== null &&
         freeNative < priceNative + FEE_MARGIN

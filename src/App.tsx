@@ -1969,14 +1969,17 @@ function DotErrorHint({ message, address }: { message: string; address: string }
 
     if (
         lower.includes("balance") ||
+        lower.includes("transferfailed") ||
         lower.includes("fundsunavailable") ||
         lower.includes("inability to pay") ||
         lower.includes("storage deposit")
     ) {
         return (
             <p className="hint">
-                <strong>Likely cause:</strong> the account has no PAS on Asset Hub
-                Next to pay contract fees. Hit the{" "}
+                <strong>Likely cause:</strong> the account doesn't have enough PAS
+                on Asset Hub Next — the domain price and storage deposits are paid
+                from the account itself (even when fees are host-sponsored). Hit
+                the{" "}
                 <a href={PAS_FAUCET_URL} target="_blank" rel="noopener">
                     Asset Hub faucet
                 </a>
