@@ -126,11 +126,14 @@ export function siteColors(background: string): SiteColors {
 }
 
 // URL-allowlist guard so an image/link block can't smuggle a javascript: URL
-// into the produced page. http(s) and relative paths only.
+// into the produced page. http(s), mailto/tel, and relative paths only —
+// the templates themselves ship "Email me" mailto: links, so those must
+// survive the render (they used to fall through to "#").
 function safeUrl(raw: string): string {
     const v = raw.trim();
     if (!v) return "#";
     if (/^https?:\/\//i.test(v)) return escapeHtml(v);
+    if (/^(mailto|tel):/i.test(v)) return escapeHtml(v);
     if (v.startsWith("/") || v.startsWith("./") || v.startsWith("#")) return escapeHtml(v);
     return "#";
 }
