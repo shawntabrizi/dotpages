@@ -749,6 +749,7 @@ export default function App() {
         color: foreground,
         "--site-foreground": foreground,
         "--site-divider": colors.divider,
+        "--site-accent": content.accentColor,
     } as React.CSSProperties;
 
     return (
@@ -1730,12 +1731,16 @@ function BlockView({
                     />
                 ) : editable ? (
                     <div
-                        className={`site-image-placeholder is-${imageSize(block.variant)} is-${imageShape(block)} block-tap`}
+                        className={`site-image-placeholder is-${imageSize(block.variant)} is-${imageShape(block)} block-tap${uploadStatus ? " is-uploading" : ""}`}
                         onClick={onEdit}
                         role="button"
                         tabIndex={0}
+                        aria-busy={uploadStatus ? true : undefined}
                         onKeyDown={(e) => e.key === "Enter" && onEdit()}
                     >
+                        {uploadStatus && (
+                            <span className="upload-spinner" aria-hidden="true" />
+                        )}
                         {uploadStatus ?? "No image yet — tap to edit"}
                     </div>
                 ) : null)}
@@ -1837,6 +1842,10 @@ function BlockEditSheet({
                                         step={stepForUploadStatus(uploadStatus)}
                                         status={uploadStatus}
                                     />
+                                    <span className="sheet-media-note">
+                                        Uploading in the background — close this
+                                        and keep editing your page.
+                                    </span>
                                 </div>
                             ) : hasImage ? (
                                 <>
