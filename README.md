@@ -1,144 +1,75 @@
 # hello-playground
 
-A single-page WYSIWYG site builder that runs as a `.dot.li` app and deploys what you type — straight to IPFS (via Bulletin Chain) and a `.dot` name. Built for the "open a thing, type two fields, tap deploy, you have a website" demo.
+> Build a website by tapping on it, then deploy it to IPFS and a `.dot` name in about a minute — no backend, no build step, no hosting account.
 
-The deployer itself is meant to be hosted at `hello-playground.dot` (or wherever) and accessed inside Polkadot Desktop / Polkadot Mobile. Everything runs in-browser — no backend, no CORS proxy, no native binaries.
+hello-playground is a single-page WYSIWYG site builder that runs entirely in your browser. You edit blocks (headings, text, buttons, images) directly on the page, watch the exact bytes that will be deployed, and publish to the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain) (served over IPFS) with a DotNS `.dot` name pointing at it. It's built to run inside Polkadot Desktop / Polkadot Mobile as a hosted app, and falls back to browser wallets when standalone.
 
-## What's here
+<!-- TODO: hero screenshot — the editor with the Profile template open, action bar visible (assets/screenshots/editor.png, ~700px wide) -->
 
-```
-hello-playground/
-├── index.html
-├── package.json           # React 19 + Vite + product-sdk + multiformats + @noble/hashes
-├── tsconfig.json
-├── vite.config.ts
-└── src/
-    ├── main.tsx           # entry
-    ├── App.tsx            # layout: editor pane (left) + iframe preview (right)
-    ├── App.css            # plain CSS, mobile-first via media query at 720px
-    ├── Editor.tsx         # form fields (header, subheader, accent, background, font) + add-block menu
-    ├── Preview.tsx        # iframe with srcDoc = renderHtml(content) — byte-for-byte the deploy artifact
-    ├── template.ts        # the bare HTML template + renderHtml(siteContent) + Block model
-    ├── signer.ts          # Host API SignerManager wrapper, adapted from playground-app-template
-    └── deploy.ts          # CID compute + auto-name derivation; chain submission is TODO
-```
+## Features
 
-## What's wired
+- **Tap-to-edit blocks** — headings, paragraphs, links, pill buttons, images, and dividers, edited in place with per-block style toggles
+- **An eject ladder, not a lock-in** — convert blocks → Markdown → raw HTML/CSS/JS (CodePen-style panes) when you outgrow the simple editor; climb back up anytime
+- **What you preview is what you deploy** — the preview renders the byte-for-byte artifact that goes on chain
+- **One-tap deploy** — stores your site on Bulletin Chain, registers a `.dot` name (auto-derived from your page title if you don't pick one), and points the name at your content
+- **Pre-flight checklist** — before you spend a transaction, the app verifies size caps, storage authorization, name availability and price, funds, and account setup with free dry-runs; failures explain themselves and link to faucets
+- **Instant redeploys** — names you already own skip registration entirely and just repoint, in seconds
+- **Image uploads, optimized** — photos are downscaled and re-encoded client-side, stored on Bulletin, and referenced by IPFS URL
+- **Host-first accounts** — uses your Polkadot Desktop/Mobile account automatically (fees sponsored by the host), with browser-extension and `//Bob` dev fallbacks
 
-- **Editor + preview.** A form with header / subheader / accent / background / font fields, plus an "Add element" button for extra paragraphs, links, images, and dividers. The iframe preview renders `renderHtml(content)` live — **the exact bytes that would be uploaded.**
-- **Three signing modes via `src/account.ts`** — `ActiveAccount` is the uniform shape; sources are wired independently so toggling between them never tears down the others:
-  - `host` — Polkadot Desktop / Mobile via `@parity/product-sdk-signer` (same pattern as the template). Tried automatically on mount.
-  - `extension` — Talisman / SubWallet / Polkadot.js via `polkadot-api/pjs-signer`. Surfaced as a "Connect browser wallet" button when host is unavailable.
-  - `dev` — `//Bob` via `createDevSigner` from `@parity/product-sdk-tx`. Always wins when the checkbox is ticked, so a local dev session works with no wallet at all.
-- **CID computation.** Blake2b-256 + raw codec (`0x55`) — matches Bulletin's default per the [bulletin-storage skill](https://publicsuffix.org/list/public_suffix_list.dat) [^1]. Computed client-side from `@noble/hashes` + `multiformats`. Pressing Deploy shows the bytes, the CID, and the `.dot.li` URL you'd land at.
-- **Auto-name.** Leave the `.dot name` field blank and the deployer picks a NoStatus-shape label (matches `dot decentralize`'s rule: base ≥9 chars + exactly 2 trailing digits, so any signer without PoP can register it).
+## Quick Start
 
-[^1]: Inline reference for the protocol detail — not the actual link. See the skill in `~/.claude/skills/bulletin-storage` for the authoritative version.
+<details>
+<summary>Prerequisites</summary>
 
-## End-to-end deploy
+- Node.js 20+
+- Network access on first install (`postinstall` runs `papi generate` against the live chains)
 
-When //Bob is selected, "Deploy" runs the full chain dance via direct `pallet-revive` contract calls — no `bulletin-deploy`, no Kubo, no backend. Architecture ported from [dotvillages / dotdot-deployer](https://github.com/paritytech/dotdot-deployer) and re-pointed at paseo-next-v2 endpoints + contracts.
+</details>
 
-Three phases, surfaced live in the status banner:
-
-1. **Bulletin store** — `TransactionStorage.Authorizations` check → `TransactionStorage.store({ data: bytes })` → wait for inclusion. Yields CID + block.
-2. **DotNS register** (ENS-style commit-reveal):
-   - `Revive.map_account()` (one-shot, cached per session)
-   - `REGISTRAR_CONTROLLER.makeCommitment(...)` (read-only)
-   - `REGISTRAR_CONTROLLER.commit(commitment)` (extrinsic)
-   - Wait `minCommitmentAge` (~60 s) — front-running protection, mandatory
-   - `POP_RULES.priceWithoutCheck(label, ownerH160)` → price × 1.1 / NATIVE_TO_ETH_RATIO
-   - `REGISTRAR_CONTROLLER.register(registration)` (extrinsic, with payment value)
-3. **Content hash bind** — `CONTENT_RESOLVER.setContenthash(namehash("<label>.dot"), encodeIpfsContenthash(cid))`
-
-The DotNS phase is **best-effort**: if any of register / setContenthash fails (most commonly because //Bob has no PAS for fees on Asset Hub Next), the result card still shows the successful Bulletin store + gateway URL. The status banner surfaces the exact reason.
-
-### Lib layout
-
-```
-src/lib/
-├── polkadot/
-│   ├── constants.ts        ← Bulletin + AH-Next RPCs, 5 DotNS contract addresses, NATIVE_TO_ETH_RATIO
-│   └── clients.ts          ← Cached PAPI clients (direct WS today; createPapiProvider for host follow-up)
-├── bulletin/
-│   ├── submit-and-wait.ts  ← Observable → Promise tx helper (handles signed/broadcast/inBlock/finalized)
-│   ├── cid.ts              ← Blake2b-256 raw-codec CID
-│   └── store.ts            ← Authorization check + TransactionStorage.store
-└── dotns/
-    ├── abis.ts             ← REGISTRY / REGISTRAR_CONTROLLER / CONTENT_RESOLVER / POP_RULES Solidity-style fragments
-    ├── namehash.ts         ← viem namehash wrapper
-    ├── address.ts          ← SS58 → H160 via ReviveApi.address (cached)
-    ├── contracts.ts        ← ensureAccountMapped + dryRunContractCall + submitContractCall
-    ├── register.ts         ← Commit-reveal flow
-    └── content-hash.ts     ← encodeIpfsContenthash + setContenthash submission
-```
-
-### Prereqs for the //Bob path to actually succeed
-
-- **Bulletin authorization for //Bob's SS58 address** (`5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty`). One-time via [the self-serve faucet](https://paritytech.github.io/polkadot-bulletin-chain/authorizations?tab=faucet).
-- **PAS on Asset Hub Next** for //Bob's mapped H160. Contract calls aren't feeless — register + setContenthash + the initial map_account all need fees. Use [the PAS faucet](https://faucet.polkadot.io/) — pick "Paseo Asset Hub Next". (A future iteration could auto-top-up from Alice, mirroring `bulletin-deploy.attemptTestnetTopUp`.)
-- **Bunch of patience for the ~60 s commitment age** between commit and register. Protocol-mandated.
-
-Host (Polkadot Desktop) and extension (Talisman / Polkadot.js / SubWallet) paths today fall back to **preview-only** — the chain submission still needs:
-
-- Host signer's `signBytes` to map through `signerManager.signRaw` instead of the stub PAPI signer
-- Either same prereqs as //Bob (Bulletin + PAS) or a fresh session signer with allocations granted via `requestResourceAllocation`
-
-## Run
-
-```sh
+```bash
 npm install
 npm run dev
 ```
 
-Open the dev server. The editor + preview should both render with the default content. The Deploy button works against the in-memory preview today — wire up the chain submission next.
+Open the printed localhost URL. For local development outside a host, tick **Use the //Bob dev account** in the Deploy panel — no wallet needed. To exercise the real host flow, open the deployed app inside Polkadot Desktop or Polkadot Mobile.
 
-## Deploy this app to `hello-playground.dot.li`
+## Deploying a Site (in the app)
 
-The deployer itself ships via [playground-cli](https://github.com/paritytech/playground-cli) (the `dot` command). It builds `dist/`, uploads the static bundle to Bulletin, and registers `hello-playground.dot` on DotNS — pointing at the resulting CID.
+1. **Edit** — pick a template (Profile, Blog post, Event, or Blank) and tap anything to change it.
+2. **Preview** — switch to the Preview tab to see the exact deployed page.
+3. **Deploy** — open the Deploy tab:
+   - The account chip shows who signs; the address underneath is copyable (you'll need it for faucets).
+   - Leave the `.dot name` blank for an auto-derived name, or type your own — the checklist validates it live.
+   - Wait for the pre-flight checks. Red ✕ items block nothing — the button arms a "Deploy anyway?" confirm — but they tell you what will fail and how to fix it.
+4. Tap **Deploy**. A fresh name takes ~90 seconds (dominated by DotNS's mandatory 60s commit–reveal wait, during which your content uploads in parallel); updating a name you own takes a few seconds.
+5. Your site is live at `https://<name>.dot.li`, and the bytes are independently fetchable from the IPFS gateway by CID.
 
-```sh
-# one-time: install + provision session keys
-curl -fsSL https://raw.githubusercontent.com/paritytech/playground-cli/main/install.sh | bash
-dot init
+**Funding notes (paseo-next-v2):**
+- *Host accounts*: transaction fees are sponsored by the host, but the domain price (~0.1 PAS) and storage deposits come from the product account itself — send it PAS from the [Asset Hub faucet](https://faucet.polkadot.io/?parachain=1500) (the checklist links it).
+- *Extension///Bob accounts*: also need Bulletin storage authorization from the [self-serve faucet](https://paritytech.github.io/polkadot-bulletin-chain/authorizations?tab=faucet). Host accounts skip this — the host submits storage on their behalf.
 
-# every release: build is auto-run by the CLI
-npm run deploy:dot -- --signer phone
+## Deploying the Builder Itself
+
+The app deploys with the [`playground` CLI](https://github.com/paritytech/dotdot-deployer) to `hello-playground.dot`:
+
+```bash
+npm run build
+playground deploy --domain hello-playground --no-build --buildDir dist --signer dev
 ```
 
-For unattended / CI deploys, swap the signer for a dev keypair:
+`playground init` pairs the CLI with your phone the first time. Use `--signer phone` to sign with your own account — note the upload itself exceeds the mobile signing channel's message limit, so `dev` is the practical choice for the multi-megabyte bundle.
 
-```sh
-npm run deploy:dot -- --signer dev --suri //Alice
-```
+## Configuration
 
-Useful flags to pass through (`npm run deploy:dot -- ...`):
+| What | Where | Notes |
+|------|-------|-------|
+| Target network | `networks.json` → `active` | Endpoints, contracts, faucets, and gateway per network (`paseo-next-v2`, `preview`) |
+| Product identifier | `VITE_PRODUCT_ACCOUNT_ID` env var | Overrides the hostname-derived identifier the host scopes accounts to |
+| Chain descriptors | `npx papi generate` | Re-run when the target runtime upgrades |
 
-- `--playground` — publish to the Playground registry so it appears in users' "my apps".
-- `--moddable` — publish the source repo URL so others can `dot mod hello-playground`.
-- `--no-build` — skip the Vite build (assume `dist/` is already current).
-- `--env <paseo-next-v2|testnet|mainnet>` — target network (default matches what the app talks to in-browser).
+## How It Works
 
-The signer hostname mapping in `src/signer.ts::getProductAccountIdentifier` already collapses `hello-playground.dot.li` back to the `hello-playground.dot` product identifier, so host-signed flows keep working under the deployed origin.
+The editor holds your site as a small block model. Rendering it (`renderHtml`) produces a complete, self-contained HTML document — that string is simultaneously the live preview and the deploy artifact. Deploying stores those bytes on Bulletin Chain (host-mediated preimage or a signed `TransactionStorage.store`), then drives the DotNS registrar contracts on Asset Hub Next through pallet-revive to register your name and point its contenthash at the CID.
 
-## Conventions
-
-- React 19 + Vite + TypeScript. Plain CSS with custom-property tokens (not Tailwind — see "design system" note below).
-- **Three-way signer resolution.** Host API first, then injected extension, with `//Bob` as a one-tick override for "I just want to test the flow without setting anything up." Per the polkadot-triangle skill's host-first / standalone-fallback rule. The host signer's `signBytes` is stubbed today — chain submission will call `signerManager.signRaw(...)` directly via the source-specific path, not the bare PAPI signer.
-- HTML escaping in `template.ts::escape` covers all five XML entities. URLs in image/link blocks go through `safeUrl()` which rejects anything that isn't `http(s)`, relative, or a fragment — so a user can't smuggle a `javascript:` URL into the produced page.
-- The preview iframe uses `sandbox="allow-popups allow-popups-to-escape-sandbox"`. No `allow-scripts`, no `allow-same-origin` — the generated HTML can't reach back into the editor or call `window.parent`.
-
-### Design system note
-
-This project intentionally **does not** adopt the Tailwind-based `polkadot-design-system` skill yet. The parent template (`playground-app-template`) uses plain CSS with custom-property tokens, and matching it is more important during scaffolding than enforcing the full design system. A future migration to the design system is one of the open follow-ups.
-
-## Open follow-ups
-
-- [ ] Empirically test whether `.dot.li` resolves raw-codec CIDs or requires UnixFS directory wrapping. Decide the storage shape.
-- [ ] Wire `TransactionStorage.store` with the right Observable handling (per `bulletin-storage` skill: `.subscribe()`, `txBestBlocksState && found`, unsubscribe on both paths).
-- [ ] Wire DotNS register + setContenthash via `product-sdk-contracts`.
-- [ ] Gate "Deploy" on a confirmed `Allocated` outcome for both `BulletInAllowance` and `SmartContractAllowance`.
-- [ ] Account-picker UI for the extension path — today we auto-pick the first extension's first account.
-- [ ] Resolve the host `signer` stub so chain submission can use a uniform `PolkadotSigner` across all three sources (or branch on `source` at submit time).
-- [ ] Tiptap or contenteditable for richer in-place editing if the structured-form pattern turns out to be too limiting.
-- [ ] Migrate styling to the Tailwind-based `polkadot-design-system` once a few more usage patterns settle.
+For the full picture — account sources, the commit–reveal pipeline, why the host signer works the way it does, chain semantics the hard way — see [ARCHITECTURE.md](ARCHITECTURE.md).
