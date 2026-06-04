@@ -14,7 +14,7 @@ import { computeCID } from "./lib/bulletin/cid.ts";
 import { checkBulletinAuthorization, MAX_TX_BYTES } from "./lib/bulletin/store.ts";
 import { getEvmAddress } from "./lib/dotns/address.ts";
 import { isAccountMapped } from "./lib/dotns/contracts.ts";
-import { checkDomainAvailability, quoteDomain } from "./lib/dotns/register.ts";
+import { checkDomainAvailability, getDomainOwner, quoteDomain } from "./lib/dotns/register.ts";
 import { getAssetHubClient } from "./lib/polkadot/clients.ts";
 import {
     BULLETIN_FAUCET_URL,
@@ -156,8 +156,19 @@ export async function runPreflight(params: {
         if (invalid) {
             return { id: "name", label: ".dot name", state: "fail", detail: invalid, link: null };
         }
+        const ownerEvm = await getEvmAddress(account.address);
         const available = await checkDomainAvailability(label, account.address);
         if (!available) {
+            const owner = await getDomainOwner(label, account.address);
+            if (owner && owner.toLowerCase() === ownerEvm.toLowerCase()) {
+                return {
+                    id: "name",
+                    label: ".dot name",
+                    state: "ok",
+                    detail: `${label}.dot is yours — deploying updates its content (no registration fee)`,
+                    link: null,
+                };
+            }
             return {
                 id: "name",
                 label: ".dot name",
@@ -166,7 +177,6 @@ export async function runPreflight(params: {
                 link: null,
             };
         }
-        const ownerEvm = await getEvmAddress(account.address);
         const quote = await quoteDomain(label, ownerEvm, account.address);
         if (quote.price !== null) priceNative = quote.price / NATIVE_TO_ETH_RATIO;
         const priceText = priceNative !== null ? ` · price ${formatPas(priceNative)}` : "";

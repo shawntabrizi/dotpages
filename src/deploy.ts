@@ -8,7 +8,12 @@
 
 import { storeHTML } from "./lib/bulletin/store.ts";
 import { getEvmAddress } from "./lib/dotns/address.ts";
-import { registerDomain, checkDomainAvailability } from "./lib/dotns/register.ts";
+import { ensureAccountMapped } from "./lib/dotns/contracts.ts";
+import {
+    checkDomainAvailability,
+    getDomainOwner,
+    registerDomain,
+} from "./lib/dotns/register.ts";
 import { setContentHash } from "./lib/dotns/content-hash.ts";
 import { DOT_HOST } from "./lib/polkadot/constants.ts";
 import type { ActiveAccount } from "./account.ts";
@@ -104,16 +109,30 @@ export async function deployFull(
         onStatus("DotNS: checking domain availability…");
         const available = await checkDomainAvailability(finalLabel, account.address);
         if (!available) {
-            throw new Error(`Domain ${finalLabel}.dot is already registered. Pick another name.`);
+            // Taken — but if it's taken by THIS account, this is a content
+            // update: skip the commit-reveal registration (and its 60s+
+            // wait) and go straight to repointing the contenthash.
+            const currentOwner = await getDomainOwner(finalLabel, account.address);
+            if (!currentOwner || currentOwner.toLowerCase() !== ownerEvmAddress.toLowerCase()) {
+                throw new Error(
+                    `Domain ${finalLabel}.dot is already registered` +
+                        (currentOwner ? ` to ${currentOwner}` : "") +
+                        ` (your account maps to ${ownerEvmAddress}). Pick another name.`,
+                );
+            }
+            onStatus("DotNS: name already yours — updating content…");
+            // registerDomain normally handles the one-time H160 mapping;
+            // the update path needs it ensured before the resolver call.
+            await ensureAccountMapped(account.address, account.signer);
+        } else {
+            await registerDomain({
+                label: finalLabel,
+                ownerEvmAddress,
+                signerAddress: account.address,
+                signer: account.signer,
+                onStatus: (s) => onStatus(`DotNS register: ${s}`),
+            });
         }
-
-        await registerDomain({
-            label: finalLabel,
-            ownerEvmAddress,
-            signerAddress: account.address,
-            signer: account.signer,
-            onStatus: (s) => onStatus(`DotNS register: ${s}`),
-        });
 
         await setContentHash({
             label: finalLabel,

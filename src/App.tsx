@@ -114,6 +114,8 @@ function stepForDeployStatus(message: string): number {
     if (message.startsWith("Bulletin:")) return 1;
     if (message.startsWith("DotNS: resolving owner")) return 2;
     if (message.startsWith("DotNS: checking domain")) return 3;
+    // Owned-name update path skips commit/wait/register entirely.
+    if (message.startsWith("DotNS: name already yours")) return 6;
     if (message.startsWith("DotNS register: Waiting")) return 5;
     if (
         message.startsWith("DotNS register: Pricing") ||

@@ -16,6 +16,30 @@ function generateSecret(): `0x${string}` {
             .join("")) as `0x${string}`;
 }
 
+/**
+ * Current registry owner (H160) of `label`.dot, or null when unregistered /
+ * the probe fails. Lets the deploy flow route "already registered to YOU"
+ * to a plain setContenthash update instead of refusing.
+ */
+export async function getDomainOwner(
+    label: string,
+    callerAddress: string,
+): Promise<`0x${string}` | null> {
+    const node = namehash(labelToFullName(label));
+    const encoded = encodeFunctionData({
+        abi: REGISTRY_ABI,
+        functionName: "owner",
+        args: [node],
+    });
+    const result = await dryRunContractCall(DOTNS_CONTRACTS.registry, callerAddress, encoded);
+    if (!result.success) return null;
+    return decodeFunctionResult({
+        abi: REGISTRY_ABI,
+        functionName: "owner",
+        data: result.returnData,
+    }) as `0x${string}`;
+}
+
 export async function checkDomainAvailability(
     label: string,
     callerAddress: string,
