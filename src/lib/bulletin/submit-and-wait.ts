@@ -21,6 +21,12 @@ export async function submitAndWait(
     },
     signer: PolkadotSigner,
     onStatus?: (status: DeployStatus) => void,
+    // The dispatch outcome (ok/dispatchError) is already known at
+    // txBestBlocksState, so "inBlock" is the default — waiting for finality
+    // added ~15-30s per transaction for no extra information. Every failure
+    // mode past in-block (reorg drops the tx) is retryable and surfaced;
+    // pass "finalized" for calls where a reorg would be unrecoverable.
+    waitFor: "inBlock" | "finalized" = "inBlock",
 ): Promise<SubmitResult> {
     return new Promise((resolve, reject) => {
         let sub: { unsubscribe: () => void } | undefined;
@@ -53,6 +59,10 @@ export async function submitAndWait(
                     }
                     bestBlock = { hash: ev.block.hash, number: ev.block.number };
                     onStatus?.("in-block");
+                    if (waitFor === "inBlock") {
+                        sub?.unsubscribe();
+                        resolve({ blockHash: ev.block.hash, blockNumber: ev.block.number });
+                    }
                 }
 
                 if (ev.type === "finalized") {
