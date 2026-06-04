@@ -94,7 +94,7 @@ export async function ensureAccountMapped(
 ): Promise<void> {
     if (mappedAccounts.has(signerAddress)) return;
 
-    const { unsafeApi, api } = getAssetHubClient();
+    const { api } = getAssetHubClient();
 
     try {
         if (await isAccountMapped(signerAddress)) return;
@@ -105,37 +105,17 @@ export async function ensureAccountMapped(
     const tx = api.tx.Revive.map_account();
     await submitAndWait(tx, signer);
 
-    // Poll until the mapping propagates (usually 1-2 blocks).
-    for (let attempt = 0; attempt < 20; attempt++) {
-        await new Promise((r) => setTimeout(r, 3000));
+    // Poll until the mapping propagates. submitAndWait resolved at in-block,
+    // so the mapping is usually visible immediately — probe right away, then
+    // every 1s (was: a blind 3s sleep before the first check, 3s interval).
+    // Same ~60s ceiling as before.
+    for (let attempt = 0; attempt < 60; attempt++) {
         try {
-            const check = await unsafeApi.apis.ReviveApi.call(
-                signerAddress,
-                ZERO_H160,
-                0n,
-                undefined,
-                undefined,
-                Binary.fromHex("0x"),
-            );
-            const c = check as {
-                result?: {
-                    value?: {
-                        type?: string;
-                        value?: { type?: string; value?: { type?: string } };
-                    };
-                };
-            };
-            const stillUnmapped =
-                c.result?.value?.type === "Module" &&
-                c.result?.value?.value?.type === "Revive" &&
-                c.result?.value?.value?.value?.type === "AccountUnmapped";
-            if (!stillUnmapped) {
-                mappedAccounts.add(signerAddress);
-                return;
-            }
+            if (await isAccountMapped(signerAddress)) return;
         } catch {
             // keep retrying
         }
+        await new Promise((r) => setTimeout(r, 1000));
     }
 
     throw new Error("Account mapping did not propagate after multiple attempts");
