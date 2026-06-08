@@ -6,9 +6,10 @@
 // the app tries the Host API first (Polkadot Desktop / Mobile) and only
 // surfaces the extension/dev paths to the user when host is unavailable.
 //
-// `signBytes` here is for arbitrary-data signing. When the chain-submission
-// path lands we'll add a sibling `signer: PolkadotSigner` for use with
-// `signSubmitAndWatch`.
+// `signer` is the underlying PAPI signer used by the deploy flow's
+// `signSubmitAndWatch` calls. The host path now resolves a real signer from
+// the SignerManager (see `tryHostAccount`), so all three sources submit chain
+// transactions through the same `PolkadotSigner` shape.
 
 import { ss58Encode, truncateAddress } from "@parity/product-sdk-address";
 import { createDevSigner, getDevPublicKey } from "@parity/product-sdk-tx";
@@ -27,6 +28,21 @@ export interface ActiveAccount {
 }
 
 const DEV_ACCOUNT_NAME = "Bob";
+
+// The currently-active account, mirrored at module scope so non-React code
+// (the CloudStorageClient's lazy signer in lib/bulletin/store.ts) can read the
+// signer of whichever source — host / extension / dev — the user has selected.
+// App owns the authoritative state and pushes changes here via
+// `setCurrentAccount` whenever the active account changes.
+let currentAccount: ActiveAccount | null = null;
+
+export function setCurrentAccount(account: ActiveAccount | null): void {
+    currentAccount = account;
+}
+
+export function getCurrentAccount(): ActiveAccount | null {
+    return currentAccount;
+}
 
 /**
  * Synchronous — `//Bob` requires no network, just a deterministic derivation.
@@ -52,30 +68,19 @@ export async function tryHostAccount(): Promise<ActiveAccount | null> {
     const state = signerManager.getState();
     const account = state.selectedAccount;
     if (!account) return null;
+    // After a successful connect the SignerManager has a selected account, so
+    // its signer must be available. A null here means the host returned a
+    // connected-but-signerless state — surface it loudly rather than handing
+    // back a stub that would fail deep inside the deploy flow.
+    const signer = signerManager.getSigner();
+    if (!signer) {
+        throw new Error("Host connected but no signer is available for the selected account");
+    }
     return {
         source: "host",
         address: account.address,
         displayName: account.name ?? truncateAddress(account.address),
-        // The host SignerAccount exposes a different signer interface than
-        // PAPI's PolkadotSigner. The actual chain-submit path will call
-        // `signerManager.signRaw` (or the host's tx-signer equivalent)
-        // rather than the bare PolkadotSigner — until that's wired we keep
-        // a stub here that throws so a misuse fails loud.
-        signer: stubHostSigner(),
-    };
-}
-
-function stubHostSigner(): PolkadotSigner {
-    const fail = (op: string): never => {
-        throw new Error(
-            `Host-signer ${op} is not wired yet. Use signerManager.signRaw(...) ` +
-                `or the host's tx signer when chain submission lands.`,
-        );
-    };
-    return {
-        publicKey: new Uint8Array(),
-        signBytes: () => Promise.reject(new Error("not wired")),
-        signTx: () => fail("signTx"),
+        signer,
     };
 }
 

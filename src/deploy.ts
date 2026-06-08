@@ -7,8 +7,8 @@
 // extra wiring for chain submission (host's signBytes is stubbed; extensions
 // may not have Bulletin/PAS authorization).
 
+import { calculateCid } from "@parity/product-sdk-cloud-storage";
 import { storeHTML } from "./lib/bulletin/store.ts";
-import { computeCID } from "./lib/bulletin/cid.ts";
 import { getEvmAddress } from "./lib/dotns/address.ts";
 import { registerDomain, checkDomainAvailability } from "./lib/dotns/register.ts";
 import { setContentHash } from "./lib/dotns/content-hash.ts";
@@ -70,7 +70,7 @@ function deriveDomain(seed: string): string {
 
 export async function previewDeploy(html: string, domain: string | null): Promise<DeployPreview> {
     const bytes = new TextEncoder().encode(html);
-    const cid = computeCID(bytes).toString();
+    const cid = (await calculateCid(bytes)).toString();
     const finalDomain = (domain ?? "").replace(/\.dot$/i, "") || deriveDomain(html.slice(0, 64));
     return {
         kind: "preview",

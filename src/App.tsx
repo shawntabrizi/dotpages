@@ -30,6 +30,7 @@ import {
     type ActiveAccount,
     getDevAccount,
     hasInjectedExtension,
+    setCurrentAccount,
     tryExtensionAccount,
     tryHostAccount,
 } from "./account.ts";
@@ -218,6 +219,13 @@ export default function App() {
     const activeAccount: ActiveAccount | null = useOwnedAccount
         ? extensionAccount ?? hostAccount
         : devAccount;
+
+    // Mirror the active account into the module-level holder so the
+    // CloudStorageClient's lazy signer (lib/bulletin/store.ts) signs with
+    // whichever source — host / extension / dev — is currently selected.
+    useEffect(() => {
+        setCurrentAccount(activeAccount);
+    }, [activeAccount]);
 
     useEffect(() => {
         if (!useOwnedAccount || hostAccount || extensionAccount) return;
