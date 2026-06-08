@@ -1,11 +1,19 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* Chrome tokens drive the editor UI (action bar, nav pill, sheets, deploy
+   panel) — NOT the .site artifact, which uses the user's chosen colors. The
+   default is dark; the host theme toggles `data-theme` on <html> (see
+   theme.ts) and the light override below adapts the chrome. */
 :root {
     --chrome-bg: rgba(17, 19, 25, 0.85);
     --chrome-surface: #1c2029;
     --chrome-border: rgba(255, 255, 255, 0.12);
     --chrome-text: #f5f5f5;
     --chrome-text2: #9ca3af;
+    --chrome-input-bg: rgba(0, 0, 0, 0.3);
+    --chrome-hover: rgba(255, 255, 255, 0.05);
+    --chrome-active: rgba(255, 255, 255, 0.1);
+    --page-bg: #0b0d12;
     --accent: #e6007a;
     --accent-hover: #c70069;
     --ok: #6ee7b7;
@@ -14,11 +22,27 @@
     --vv-bottom: 0px;
     --vv-bottom-fallback: 0px;
 }
+
+/* Host light theme — same pink accent, light chrome surfaces. */
+html[data-theme="light"] {
+    --chrome-bg: rgba(255, 255, 255, 0.9);
+    --chrome-surface: #ffffff;
+    --chrome-border: rgba(0, 0, 0, 0.12);
+    --chrome-text: #15171c;
+    --chrome-text2: #6b7280;
+    --chrome-input-bg: rgba(0, 0, 0, 0.04);
+    --chrome-hover: rgba(0, 0, 0, 0.05);
+    --chrome-active: rgba(0, 0, 0, 0.08);
+    --page-bg: #f5f6f8;
+    --ok: #059669;
+    --danger: #dc2626;
+}
+
 html.in-iframe { --vv-bottom-fallback: 60px; }
 
 html, body { height: 100%; }
 body {
-    background: #0b0d12;
+    background: var(--page-bg);
     color: var(--chrome-text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -28,7 +52,13 @@ body {
 
 .site {
     min-height: 100dvh;
-    padding: 80px 24px 140px;
+    /* Top padding clears the notch; left/right clear rounded-corner cutouts.
+       Insets are 0 on desktop, so this is a no-op there. */
+    padding:
+        calc(80px + env(safe-area-inset-top))
+        calc(24px + env(safe-area-inset-right))
+        140px
+        calc(24px + env(safe-area-inset-left));
     color: #f5f5f5;
     line-height: 1.5;
     transition: background 0.2s ease, color 0.2s ease;
@@ -353,8 +383,8 @@ body {
     text-align: left;
     cursor: pointer;
 }
-.font-menu button:hover { background: rgba(255,255,255,0.05); }
-.font-menu button.is-active { background: rgba(255,255,255,0.1); }
+.font-menu button:hover { background: var(--chrome-hover); }
+.font-menu button.is-active { background: var(--chrome-active); }
 
 .font-size-row {
     display: flex;
@@ -390,7 +420,7 @@ body {
     flex: 1;
     min-width: 0;
     padding: 5px 0;
-    background: rgba(0,0,0,0.3);
+    background: var(--chrome-input-bg);
     border: 1px solid var(--accent);
     border-radius: 8px;
     color: var(--chrome-text);
@@ -403,7 +433,7 @@ body {
 .action-btn {
     width: 28px; height: 28px;
     border-radius: 999px;
-    background: rgba(0,0,0,0.4);
+    background: var(--chrome-input-bg);
     border: 1px solid var(--chrome-border);
     color: var(--chrome-text);
     font: inherit;
@@ -458,7 +488,7 @@ body {
     text-align: left;
     cursor: pointer;
 }
-.add-menu button:hover { background: rgba(255,255,255,0.05); }
+.add-menu button:hover { background: var(--chrome-hover); }
 
 .pane-btn { font-size: 11px; font-weight: 600; }
 .action-btn.is-active {
@@ -495,7 +525,7 @@ body {
     cursor: pointer;
 }
 .mode-menu button:last-child { border-bottom: 0; }
-.mode-menu button:hover { background: rgba(255,255,255,0.05); }
+.mode-menu button:hover { background: var(--chrome-hover); }
 .mode-menu button.is-active { background: rgba(255,255,255,0.08); }
 .mode-current { color: var(--ok); font-size: 11px; font-weight: 600; }
 
@@ -529,7 +559,7 @@ body {
     cursor: pointer;
 }
 .tmpl-menu button:last-child { border-bottom: 0; }
-.tmpl-menu button:hover { background: rgba(255,255,255,0.05); }
+.tmpl-menu button:hover { background: var(--chrome-hover); }
 .tmpl-name { font-size: 13px; font-weight: 600; }
 .tmpl-desc { font-size: 11px; color: var(--chrome-text2); }
 
@@ -561,7 +591,7 @@ body {
 .sheet-field { display: flex; flex-direction: column; gap: 5px; }
 .sheet-field > span { font-size: 11px; font-weight: 500; color: var(--chrome-text2); }
 .sheet-field input {
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--chrome-input-bg);
     border: 1px solid var(--chrome-border);
     border-radius: 10px;
     color: var(--chrome-text);
@@ -745,7 +775,7 @@ body {
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field input[type="text"] {
     width: 100%;
-    background: rgba(0,0,0,0.4);
+    background: var(--chrome-input-bg);
     border: 1px solid var(--chrome-border);
     border-radius: 8px;
     padding: 9px 12px;
@@ -788,11 +818,12 @@ body {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 13px;
     color: var(--chrome-text);
-    background: rgba(0,0,0,0.3);
+    background: var(--chrome-input-bg);
     padding: 8px 12px;
     border-radius: 8px;
     border: 1px solid var(--chrome-border);
     word-break: break-all;
+    overflow-wrap: anywhere;
 }
 
 .hint { color: var(--chrome-text2); font-size: 12px; line-height: 1.5; }
@@ -835,7 +866,7 @@ body {
     flex-direction: column;
     gap: 9px;
     padding: 10px 12px;
-    background: rgba(0,0,0,0.3);
+    background: var(--chrome-input-bg);
     border: 1px solid var(--chrome-border);
     border-radius: 8px;
 }
@@ -896,7 +927,7 @@ body {
     flex-direction: column;
     gap: 6px;
     padding: 12px;
-    background: rgba(0,0,0,0.3);
+    background: var(--chrome-input-bg);
     border-radius: 10px;
     border: 1px solid var(--chrome-border);
 }
@@ -910,7 +941,15 @@ body {
     letter-spacing: 0.06em;
     flex: 0 0 64px;
 }
-.row-value { color: var(--chrome-text); word-break: break-all; }
+/* min-width:0 lets the flex value shrink below its content width so the long
+   CID / gateway URL wraps inside the card instead of blowing out the layout. */
+.row-value {
+    color: var(--chrome-text);
+    flex: 1 1 0;
+    min-width: 0;
+    word-break: break-all;
+    overflow-wrap: anywhere;
+}
 .row-value a { color: var(--accent); text-decoration: none; }
 .row-value a:hover { text-decoration: underline; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
@@ -924,7 +963,7 @@ body {
 .result-note a { color: inherit; text-decoration: underline; }
 .result-note a:hover { text-decoration: none; }
 .result-note code {
-    background: rgba(0,0,0,0.4);
+    background: var(--chrome-input-bg);
     padding: 1px 6px;
     border-radius: 4px;
     font-size: 11px;
@@ -948,8 +987,13 @@ body {
 .code-pane {
     min-height: 100dvh;
     /* Bottom padding tracks the visual viewport (keyboard) like the floating
-       bars do, so the caret can't hide behind the keyboard or the pills. */
-    padding: 24px 16px calc(180px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px));
+       bars do, so the caret can't hide behind the keyboard or the pills. Top
+       and sides clear the notch / rounded corners (insets are 0 on desktop). */
+    padding:
+        calc(24px + env(safe-area-inset-top))
+        calc(16px + env(safe-area-inset-right))
+        calc(180px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px))
+        calc(16px + env(safe-area-inset-left));
     display: flex;
 }
 .code-card {
@@ -999,16 +1043,72 @@ body {
     border: 0;
 }
 
-/* ── Mobile tweaks ──────────────────────────────────────────────────────── */
+/* ── Responsive: tablet & phone ─────────────────────────────────────────────
+   The app is a single-view tab model (Edit / Preview / Deploy swap full-screen
+   via the bottom nav) — there are no side-by-side panes to stack. The work
+   here is phone-fit polish: full-bleed deploy sheet, generous touch targets,
+   16px inputs (no iOS zoom-on-focus), and no horizontal overflow anywhere. */
 
-@media (max-width: 600px) {
-    .site { padding: 64px 16px 160px; }
+/* Never let a stray wide child scroll the page sideways on a phone. */
+@media (max-width: 768px) {
+    html, body { overflow-x: hidden; }
+
+    .site {
+        padding:
+            calc(64px + env(safe-area-inset-top))
+            calc(16px + env(safe-area-inset-right))
+            160px
+            calc(16px + env(safe-area-inset-left));
+    }
     .float-bottom { bottom: calc(72px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px)); }
     .action-bar { padding: 5px 12px; gap: 6px; }
     /* ≥16px or iOS Safari zooms the viewport on focus and never zooms back. */
     .code-editor-host .cm-editor .cm-scroller { font-size: 16px; }
+    .field input[type="text"],
+    .url-preview,
+    .font-size-row input,
+    .font-size-row .font-size-value { font-size: 16px; }
+
+    /* Deploy panel: near-full-width card with generous padding, floating just
+       above the bottom nav pill (kept clear of it so the Deploy button and
+       result rows are never hidden behind the floating nav). */
     .deploy-panel {
-        width: calc(100% - 16px);
-        bottom: calc(80px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px));
+        left: 8px;
+        right: 8px;
+        transform: none;
+        width: auto;
+        max-width: none;
+        padding: 20px
+            calc(18px + env(safe-area-inset-right))
+            20px
+            calc(18px + env(safe-area-inset-left));
+        bottom: calc(72px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px));
+        max-height: calc(100dvh - 150px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     }
+
+    /* Roomier tap targets. Standalone controls hit the full 44px; the action
+       bar packs several buttons in one fixed pill, so its buttons grow to a
+       finger-friendly 40px rather than the full 44 — at most 5 buttons + the
+       two satellite circles still fit a 320px screen, and a wider visible
+       button can't be clipped by the bar (no overflow container, or the
+       pop-up menus anchored above it would be cut off). */
+    .float-circle { min-width: 44px; min-height: 44px; }
+    .nav-tab { min-height: 44px; }
+    .action-btn { width: 40px; height: 40px; font-size: 18px; }
+    .swatch { width: 36px; height: 36px; }
+    .block-corner { width: 32px; height: 32px; }
+    .block-edit { right: 38px; }
+    .add-menu button,
+    .font-menu button,
+    .mode-menu button,
+    .tmpl-menu button { min-height: 44px; }
+}
+
+/* Small phones. */
+@media (max-width: 480px) {
+    .deploy-title { font-size: 17px; }
+    /* Stack the byte/CID rows so the long mono values get the full width to
+       wrap into, instead of fighting the fixed label column. */
+    .row-line { flex-direction: column; gap: 2px; }
+    .row-label { flex: none; }
 }

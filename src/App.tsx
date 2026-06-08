@@ -47,6 +47,7 @@ import {
     renderMarkdownHtml,
     renderMarkdownParts,
 } from "./markdown.ts";
+import { useHostTheme } from "./theme.ts";
 
 type View = "edit" | "preview" | "deploy";
 // The one-way "eject" ladder: blocks → markdown → html are exact conversions;
@@ -230,6 +231,10 @@ export default function App() {
     const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
     const toggleMenu = (menu: ActionMenu) =>
         setOpenMenu((prev) => (prev === menu ? null : menu));
+
+    // Mirror the host's light/dark theme onto <html data-theme>. No-op (stays
+    // dark) when running standalone with no host transport.
+    useHostTheme();
 
     // Signer state — Bob default, owned-account opt-in.
     const [useOwnedAccount, setUseOwnedAccount] = useState(false);
