@@ -1,6 +1,6 @@
 // Host-API signer wrapper. Adapted from playground-app-template's utils.ts,
 // trimmed to what hello-playground actually needs: a connected product-account
-// signer and the BulletInAllowance resource grant (for the eventual
+// signer and the BulletinAllowance resource grant (for the eventual
 // TransactionStorage.store call). DotNS-allowance handling will live here too
 // once the deploy path is fully wired.
 
@@ -22,14 +22,14 @@ import {
 const DEFAULT_PRODUCT_ACCOUNT_DOT_NS = "hello-playground.dot";
 const PRODUCT_ACCOUNT_DERIVATION_INDEX = 0;
 
-// What we ask the host to grant us. BulletInAllowance is the one that matters
+// What we ask the host to grant us. BulletinAllowance is the one that matters
 // for `TransactionStorage.store` — without it our store calls fail silently.
 // SmartContractAllowance is included for the future DotNS register/setContent
 // path (pallet-revive). The others are kept aligned with the template so a
 // single consent dialog covers everything.
 const RESOURCE_ALLOCATION_REQUESTS = [
     { tag: "StatementStoreAllowance", value: undefined },
-    { tag: "BulletInAllowance", value: undefined },
+    { tag: "BulletinAllowance", value: undefined },
     { tag: "SmartContractAllowance", value: PRODUCT_ACCOUNT_DERIVATION_INDEX },
     { tag: "AutoSigning", value: undefined },
 ] as const satisfies ReadonlyArray<CodecType<typeof AllocatableResource>>;
