@@ -5,14 +5,14 @@
     "pah": {
       "wsUrl": "wss://paseo-asset-hub-next-rpc.polkadot.io",
       "metadata": ".papi/metadata/pah.scale",
-      "genesis": "0x173cea9df45656cf612c8b8ece56e04e9a693c69cfaac47d3628dae735067af8",
-      "codeHash": "0x034a12c80512c7b07ca5a875f43b6bea751fc3ce1779b523b031f106dfed4623"
+      "genesis": "0xbf0488dbe9daa1de1c08c5f743e26fdc2a4ecd74cf87dd1b4b1eeb99ae4ef19f",
+      "codeHash": "0x0e8f8089115eae9a8a36c1b9235a2e88752a275d968b7e7f1226b3f47920bee7"
     },
     "bulletin": {
       "wsUrl": "wss://paseo-bulletin-next-rpc.polkadot.io",
       "metadata": ".papi/metadata/bulletin.scale",
       "genesis": "0x8cfe6717dc4becfda2e13c488a1e2061ff2dfee96e7d031157f72d36716c0a22",
-      "codeHash": "0x4fe167698d8a654b0d832ffa2b22471689331b278d93e1802b4f3d469b807d5a"
+      "codeHash": "0xbf2cd56d20198f00ab6f38d7e77f15a9d5671d47beb5d456012ed45d23572045"
     }
   }
 }
