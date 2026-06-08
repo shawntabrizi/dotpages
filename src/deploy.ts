@@ -3,9 +3,8 @@
 //   2. DotNS register (label → owned)
 //   3. DotNS setContenthash (CID ↔ label)
 //
-// The host/extension paths still preview-only because their signers need
-// extra wiring for chain submission (host's signBytes is stubbed; extensions
-// may not have Bulletin/PAS authorization).
+// The host signer is no longer stubbed. Host/extension submission enablement
+// and Allocated gating are pending (Task 4).
 
 import { calculateCid } from "@parity/product-sdk-cloud-storage";
 import { storeHTML } from "./lib/bulletin/store.ts";
@@ -31,7 +30,7 @@ export interface DeploySuccess {
     domain: string;
     url: string;
     gatewayUrl: string;
-    blockHash: string;
+    blockHash: string | null;
     blockNumber: number;
     /** True iff DotNS register + setContenthash both succeeded — `<name>.dot.li` resolves. */
     dotMapped: boolean;
@@ -118,6 +117,7 @@ export async function deployFull(
             throw new Error(`Domain ${finalLabel}.dot is already registered. Pick another name.`);
         }
 
+        // TODO(T4): host/extension submission + Allocated gating
         await registerDomain({
             label: finalLabel,
             ownerEvmAddress,
@@ -126,6 +126,7 @@ export async function deployFull(
             onStatus: (s) => onStatus(`DotNS register: ${s}`),
         });
 
+        // TODO(T4): host/extension submission + Allocated gating
         await setContentHash({
             label: finalLabel,
             cidString: stored.cid,

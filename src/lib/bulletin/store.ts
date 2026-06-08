@@ -23,7 +23,6 @@ import type { DeployStatus } from "./submit-and-wait.ts";
 
 /** Per-transaction chain cap — applies regardless of account authorization. */
 export const MAX_TX_BYTES = 2 * 1024 * 1024; // 2 MiB on Paseo Next (8 MiB on Polkadot Bulletin)
-const MAX_SIZE = MAX_TX_BYTES;
 
 // `environment: "paseo"` resolves to the paseo-bulletin-next chain
 // (genesis 0x8cfe…0a22, wss://paseo-bulletin-next-rpc.polkadot.io) — the same
@@ -33,7 +32,7 @@ const ENVIRONMENT = "paseo" as const;
 export interface StoreHTMLResult {
     cid: string;
     blockNumber: number;
-    blockHash: string;
+    blockHash: string | null;
     ipfsUrl: string;
     bytes: number;
 }
@@ -55,7 +54,8 @@ function getCloudStorageClient(): Promise<CloudStorageClient> {
         const signer: PolkadotSigner = createLazySigner(
             () => getCurrentAccount()?.signer ?? null,
         );
-        clientPromise = CloudStorageClient.create({ environment: ENVIRONMENT, signer });
+        clientPromise = CloudStorageClient.create({ environment: ENVIRONMENT, signer })
+            .catch((err) => { clientPromise = null; return Promise.reject(err); });
     }
     return clientPromise;
 }
@@ -80,9 +80,9 @@ export async function storeBytes(params: {
     const { bytes, signerAddress, displayName, label = "Content", onStatus } = params;
 
     if (bytes.length === 0) throw new Error(`${label} is empty — nothing to store`);
-    if (bytes.length > MAX_SIZE) {
+    if (bytes.length > MAX_TX_BYTES) {
         throw new Error(
-            `${label} is ${bytes.length.toLocaleString()} bytes — Bulletin max is ${MAX_SIZE.toLocaleString()} (~2 MiB)`,
+            `${label} is ${bytes.length.toLocaleString()} bytes — Bulletin max is ${MAX_TX_BYTES.toLocaleString()} (~2 MiB)`,
         );
     }
 
@@ -105,10 +105,8 @@ export async function storeBytes(params: {
     const result = await client
         .store(bytes)
         .withCallback((evt) => {
-            if ("type" in evt) {
-                if (evt.type === TxStatus.Broadcasted) onStatus?.("broadcasting");
-                else if (evt.type === TxStatus.InBlock) onStatus?.("in-block");
-            }
+            if (evt.type === TxStatus.Broadcasted) onStatus?.("broadcasting");
+            else if (evt.type === TxStatus.InBlock) onStatus?.("in-block");
         })
         .send();
     onStatus?.("finalized");
@@ -119,8 +117,8 @@ export async function storeBytes(params: {
         blockNumber: result.blockNumber ?? 0,
         // StoreResult exposes block number + extrinsic index, not a block hash.
         // The hash isn't surfaced by the host-routed store path; downstream only
-        // displays the number, so leave it empty.
-        blockHash: "",
+        // displays the number.
+        blockHash: null,
         ipfsUrl: `${BULLETIN_GATEWAY}${cid}`,
         bytes: bytes.length,
     };
