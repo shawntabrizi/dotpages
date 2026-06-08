@@ -40,6 +40,7 @@ import {
     storeBytes,
 } from "./lib/bulletin/store.ts";
 import { MAX_IMAGE_DIMENSION, resizeImageToFit } from "./image-resize.ts";
+import { signerManager, useResourceAllocationState } from "./signer.ts";
 import { TEMPLATES, type Template } from "./templates.ts";
 import {
     blocksToMarkdown,
@@ -214,6 +215,17 @@ export default function App() {
     const [resolvingOwned, setResolvingOwned] = useState(false);
     const [ownedError, setOwnedError] = useState<string | null>(null);
     const [maxStoreBytes, setMaxStoreBytes] = useState<number | null>(null);
+
+    // Host resource grants — the deploy gate for host-sourced accounts needs
+    // BulletinAllowance + SmartContractAllowance both "Allocated".
+    const resourceState = useResourceAllocationState();
+    const hostAllowancesGranted = useMemo(() => {
+        const allocated = (resource: string) =>
+            resourceState.entries.some(
+                (e) => e.resource === resource && e.outcome === "Allocated",
+            );
+        return allocated("BulletinAllowance") && allocated("SmartContractAllowance");
+    }, [resourceState]);
 
     const devAccount = useMemo(() => getDevAccount(), []);
     const activeAccount: ActiveAccount | null = useOwnedAccount
@@ -533,7 +545,23 @@ export default function App() {
         };
         try {
             const html = currentHtml();
-            if (activeAccount?.source === "dev") {
+            const source = activeAccount?.source;
+            // dev + extension + host all submit for real via deployFull.
+            // - extension: no host allowance model — Bulletin authorization +
+            //   PAS funds are checked at submit time inside deployFull (which
+            //   throws clear faucet/funds errors).
+            // - host: gated on the host having granted both allowances; if not,
+            //   we surface a clear message instead of silently downgrading to a
+            //   preview.
+            // - anything else (no signer): preview only.
+            if (source === "host" && !hostAllowancesGranted) {
+                throw new Error(
+                    "The host hasn't granted the Bulletin and smart-contract " +
+                        "allowances needed to deploy yet. Approve the allocation " +
+                        "request in your Polkadot host, then retry.",
+                );
+            }
+            if (activeAccount) {
                 const stored = await deployFull(
                     html,
                     domain || null,
@@ -1013,6 +1041,28 @@ export default function App() {
                         </span>
                     </div>
 
+                    {activeAccount?.source === "host" && !hostAllowancesGranted && (
+                        <div className="deploy-field">
+                            <p className="hint">
+                                Waiting on the Polkadot host to grant the Bulletin
+                                and smart-contract allowances this deploy needs.
+                                Approve the allocation request in your host, then
+                                retry.
+                            </p>
+                            <button
+                                className="pill pill-secondary"
+                                onClick={() =>
+                                    void signerManager.requestResourceAllocation()
+                                }
+                                disabled={busy || resourceState.status === "requesting"}
+                            >
+                                {resourceState.status === "requesting"
+                                    ? "Requesting allowances…"
+                                    : "Request host allowances"}
+                            </button>
+                        </div>
+                    )}
+
                     <button
                         className="pill pill-primary pill-wide"
                         onClick={deploy}
@@ -1071,9 +1121,10 @@ export default function App() {
                                 </div>
                             ) : (
                                 <p className="result-note">
-                                    Preview only — chain submission for{" "}
-                                    {activeAccount?.source ?? "this signer"} isn't wired.
-                                    Untick "Sign with my own account" to deploy as //Bob.
+                                    Preview only — no signer is connected, so nothing
+                                    was submitted. Connect a host or browser-wallet
+                                    account, or untick "Sign with my own account" to
+                                    deploy as //Bob.
                                 </p>
                             )}
                         </div>

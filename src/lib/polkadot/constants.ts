@@ -8,6 +8,11 @@ export const BULLETIN_GATEWAY = "https://paseo-bulletin-next-ipfs.polkadot.io/ip
 
 export const ASSET_HUB_RPC = "wss://paseo-asset-hub-next-rpc.polkadot.io";
 
+// Asset Hub Next genesis hash (`.papi/polkadot-api.json` "pah".genesis).
+// Used to host-route the chain provider via `createPapiProvider`.
+export const ASSET_HUB_GENESIS =
+    "0x173cea9df45656cf612c8b8ece56e04e9a693c69cfaac47d3628dae735067af8";
+
 // DotNS deployed contract addresses on paseo-next-v2's Asset Hub.
 export const DOTNS_CONTRACTS = {
     registry: "0x8877344A885682523B4613779C95688ed7037BfD",
