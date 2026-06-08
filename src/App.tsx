@@ -472,7 +472,6 @@ export default function App() {
         );
         const stored = await storeBytes({
             bytes,
-            signer: activeAccount.signer,
             signerAddress: activeAccount.address,
             displayName: activeAccount.displayName,
             label,

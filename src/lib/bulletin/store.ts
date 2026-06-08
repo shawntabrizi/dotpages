@@ -5,14 +5,16 @@
 //
 // The client is a lazy singleton built once and reused. Its signer is resolved
 // per-call from the currently-active account (host / extension / dev) so the
-// same client signs with whichever source the user selected — deploy.ts still
-// threads `account.signer` explicitly for the dev path, but the CloudStorage
-// client must use the live active account.
+// same client signs with whichever source the user selected. Callers supply
+// only `signerAddress` (used for the authorization pre-flight); actual signing
+// goes through the lazy signer — there is no `signer` param on storeBytes /
+// storeHTML.
 
 import {
     CloudStorageClient,
     createLazySigner,
     calculateCid,
+    TxStatus,
 } from "@parity/product-sdk-cloud-storage";
 import type { PolkadotSigner } from "polkadot-api";
 import { getCurrentAccount } from "../../account.ts";
@@ -70,7 +72,6 @@ export async function checkBulletinAuthorization(address: string): Promise<AuthC
 
 export async function storeBytes(params: {
     bytes: Uint8Array;
-    signer: PolkadotSigner;
     signerAddress: string;
     displayName: string;
     label?: string;
@@ -101,7 +102,15 @@ export async function storeBytes(params: {
     }
 
     onStatus?.("signing");
-    const result = await client.store(bytes).send();
+    const result = await client
+        .store(bytes)
+        .withCallback((evt) => {
+            if ("type" in evt) {
+                if (evt.type === TxStatus.Broadcasted) onStatus?.("broadcasting");
+                else if (evt.type === TxStatus.InBlock) onStatus?.("in-block");
+            }
+        })
+        .send();
     onStatus?.("finalized");
 
     const cid = result.cid?.toString() ?? (await calculateCid(bytes)).toString();
@@ -119,14 +128,12 @@ export async function storeBytes(params: {
 
 export async function storeHTML(params: {
     html: string;
-    signer: PolkadotSigner;
     signerAddress: string;
     displayName: string;
     onStatus?: (status: DeployStatus) => void;
 }): Promise<StoreHTMLResult> {
     return storeBytes({
         bytes: new TextEncoder().encode(params.html),
-        signer: params.signer,
         signerAddress: params.signerAddress,
         displayName: params.displayName,
         label: "HTML",

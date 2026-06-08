@@ -96,7 +96,6 @@ export async function deployFull(
     onStatus("Bulletin: connecting…");
     const stored = await storeHTML({
         html,
-        signer: account.signer,
         signerAddress: account.address,
         displayName: account.displayName,
         onStatus: (s) => onStatus(`Bulletin: ${s}`),
