@@ -34,6 +34,7 @@ import {
     tryExtensionAccount,
     tryHostAccount,
 } from "./account.ts";
+import { isInsideContainerSync } from "@parity/product-sdk-host";
 import {
     checkBulletinAuthorization,
     MAX_TX_BYTES,
@@ -546,6 +547,22 @@ export default function App() {
         try {
             const html = currentHtml();
             const source = activeAccount?.source;
+
+            // Chain access (Bulletin store + DotNS) is host-routed and requires
+            // running inside a Polkadot host. Show a clear message instead of
+            // letting the SDK throw the raw "Host provider unavailable" error.
+            if (activeAccount && !isInsideContainerSync()) {
+                const preview = await previewDeploy(html, domain || null);
+                setResult(preview);
+                setDeployError(
+                    "Deploy requires running inside a Polkadot host (Desktop or Mobile). " +
+                        "You're previewing standalone — the CID and gateway URL above are " +
+                        "computed locally but nothing was submitted to the chain. " +
+                        "Open this app inside Polkadot Desktop or Mobile to publish.",
+                );
+                return;
+            }
+
             // dev + extension + host all submit for real via deployFull.
             // - extension: no host allowance model — Bulletin authorization +
             //   PAS funds are checked at submit time inside deployFull (which
@@ -1124,10 +1141,10 @@ export default function App() {
                                 </div>
                             ) : (
                                 <p className="result-note">
-                                    Preview only — no signer is connected, so nothing
-                                    was submitted. Connect a host or browser-wallet
-                                    account, or untick "Sign with my own account" to
-                                    deploy as //Bob.
+                                    Preview only — the CID and gateway URL are computed
+                                    locally but nothing was submitted. Deploy requires
+                                    running inside Polkadot Desktop or Mobile (chain
+                                    access is host-routed).
                                 </p>
                             )}
                         </div>

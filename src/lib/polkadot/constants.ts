@@ -3,7 +3,9 @@
 //   - playground-cli/src/config.ts (RPCs + gateway)
 //   - bulletin-deploy/assets/environments.json (DotNS contract addresses)
 
-export const BULLETIN_RPC = "wss://paseo-bulletin-next-rpc.polkadot.io";
+// Note: BULLETIN_RPC was removed — Bulletin chain is reached via
+// CloudStorageClient({ environment: "paseo" }) which uses its own host-routed
+// transport. BULLETIN_GATEWAY is still used to construct IPFS gateway URLs.
 export const BULLETIN_GATEWAY = "https://paseo-bulletin-next-ipfs.polkadot.io/ipfs/";
 
 export const ASSET_HUB_RPC = "wss://paseo-asset-hub-next-rpc.polkadot.io";

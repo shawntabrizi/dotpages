@@ -25,8 +25,8 @@ import type { DeployStatus } from "./submit-and-wait.ts";
 export const MAX_TX_BYTES = 2 * 1024 * 1024; // 2 MiB on Paseo Next (8 MiB on Polkadot Bulletin)
 
 // `environment: "paseo"` resolves to the paseo-bulletin-next chain
-// (genesis 0x8cfe…0a22, wss://paseo-bulletin-next-rpc.polkadot.io) — the same
-// chain BULLETIN_RPC points at. Verified against the chain-client preset.
+// (genesis 0x8cfe…0a22, wss://paseo-bulletin-next-rpc.polkadot.io).
+// Verified against the chain-client preset.
 const ENVIRONMENT = "paseo" as const;
 
 export interface StoreHTMLResult {
