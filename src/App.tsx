@@ -6,7 +6,6 @@ const CodeEditor = React.lazy(() => import("./CodeEditor.tsx"));
 import type { EditorHandle } from "./CodeEditor.tsx";
 import {
     assembleDocument,
-    DEFAULT_CONTENT,
     DEFAULT_FONT_SIZE,
     escapeHtml,
     FONT_OPTIONS,
@@ -47,12 +46,30 @@ import {
     renderMarkdownHtml,
     renderMarkdownParts,
 } from "./markdown.ts";
+// Draft model + landing entry points live in draft.ts (pure, React-free) so the
+// landing page reads drafts without mounting the editor. The editor below is
+// entered with a BuilderEntry and autosaves into that draft's slot.
+import {
+    initialStateForEntry,
+    saveDraft,
+    loadDrafts,
+    deleteDraft,
+    restoreDraft,
+    makeBlockId,
+    type BuilderEntry,
+    type Draft,
+    type DraftRecord,
+    type EditorMode,
+} from "./draft.ts";
+import Landing from "./Landing.tsx";
+import { recordDeployedSite } from "./deployed.ts";
+import { easedStepProgress, PROGRESS_TAU_MS } from "./progress.ts";
 
 type View = "edit" | "preview" | "deploy";
 // The one-way "eject" ladder: blocks → markdown → html are exact conversions;
 // going back up restores the last block-editor state (kept in memory) and
-// discards the text edits — never a lossy parse.
-type EditorMode = "blocks" | "markdown" | "html";
+// discards the text edits — never a lossy parse. (EditorMode is defined in
+// draft.ts and imported above.)
 // One open menu at a time — a single state slot makes overlap impossible.
 type ActionMenu = "layout" | "colors" | "font" | "add" | "mode";
 // HTML mode is CodePen-style: three panes assembled into one document.
@@ -138,87 +155,9 @@ function stepForDeployStatus(message: string): number {
 const HOST_SIGN_BUDGET = 256 * 1024;
 const MIN_SIGN_BUDGET = 32 * 1024;
 
-function makeBlockId(): string {
-    return Math.random().toString(36).slice(2, 10);
-}
-
-// Draft autosave: the full editing state, debounced into localStorage so a
-// refresh/crash never loses work. Undo history is session-only by design.
-const STORAGE_KEY = "hello-playground.draft.v1";
-
-interface Draft {
-    mode: EditorMode;
-    content: SiteContent;
-    markdownText: string;
-    htmlText: string;
-    cssText: string;
-    jsText: string;
-}
-
-// localStorage is user-writable and schema versions drift — a draft block
-// missing a required string field crashed render (escapeHtml(undefined)),
-// and unknown block types rendered as "undefined". Keep only blocks that
-// match the model, defaulting the per-block strings; theme fields default
-// to the blank template's values. Corrupt-beyond-JSON drafts already fall
-// back to DEFAULT_CONTENT via loadDraft's catch.
-function sanitizeContent(c: SiteContent): SiteContent {
-    const str = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback);
-    const blocks: Block[] = (Array.isArray(c.blocks) ? c.blocks : [])
-        .filter((b): b is Block => !!b && typeof b === "object" && typeof b.type === "string")
-        .flatMap((b): Block[] => {
-            const id = str(b.id) || makeBlockId();
-            switch (b.type) {
-                case "heading":
-                case "paragraph":
-                    return [{ id, type: b.type, text: str(b.text) }];
-                case "link":
-                    return [{ ...b, id, label: str(b.label), url: str(b.url) }];
-                case "image":
-                    return [{ ...b, id, url: str(b.url), alt: str(b.alt) }];
-                case "divider":
-                    return [{ id, type: "divider" }];
-                default:
-                    return []; // unknown type — drop rather than render "undefined"
-            }
-        });
-    return {
-        ...c,
-        accentColor: str(c.accentColor, "#e6007a"),
-        background: str(c.background, "#0b0d12"),
-        fontFamily: str(c.fontFamily, "system-ui"),
-        blocks,
-    };
-}
-
-// Older drafts had fixed `header`/`subheader` fields (now heading/paragraph
-// blocks) and an `avatar` image variant (now size `small` via imageSize()).
-function migrateContent(c: SiteContent & { header?: string; subheader?: string }): SiteContent {
-    const lead: Block[] = [];
-    if (typeof c.header === "string" && c.header)
-        lead.push({ id: makeBlockId(), type: "heading", text: c.header });
-    if (typeof c.subheader === "string" && c.subheader)
-        lead.push({ id: makeBlockId(), type: "paragraph", text: c.subheader });
-    if (lead.length === 0) return sanitizeContent(c);
-    const { header: _h, subheader: _s, ...rest } = c;
-    return sanitizeContent({ ...rest, blocks: [...lead, ...c.blocks] });
-}
-
-function loadDraft(): Draft | null {
-    try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return null;
-        const d = JSON.parse(raw) as Draft;
-        if (!d || typeof d !== "object") return null;
-        if (!d.content || !Array.isArray(d.content.blocks)) return null;
-        if (!["blocks", "markdown", "html"].includes(d.mode)) return null;
-        return { ...d, content: migrateContent(d.content) };
-    } catch {
-        // Unavailable storage (private mode, sandbox) or corrupt JSON.
-        return null;
-    }
-}
-
-const initialDraft = loadDraft();
+// Draft persistence (load/save/sanitize/migrate) + makeBlockId now live in
+// draft.ts, shared with the landing page. The editor receives a BuilderEntry
+// and autosaves into that draft's slot via saveDraft(entry.id, …).
 
 // Add-menu entries. Link and Button are presented as two separate components
 // (a Button is a pill-styled link under the hood — no toggle between them).
@@ -238,16 +177,20 @@ const BLOCK_PRESETS = {
 } satisfies Record<string, () => Block>;
 type BlockPreset = keyof typeof BLOCK_PRESETS;
 
-export default function App() {
-    const [content, setContent] = useState<SiteContent>(
-        initialDraft?.content ?? DEFAULT_CONTENT,
-    );
-    const [mode, setMode] = useState<EditorMode>(initialDraft?.mode ?? "blocks");
-    const [markdownText, setMarkdownText] = useState(initialDraft?.markdownText ?? "");
+// The editor. Entered from the landing page with a BuilderEntry (resume a
+// draft, start from a template, or a blank markdown/html start). All edits
+// autosave into entry.id; `onExit` returns to the landing page.
+function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) {
+    // Build the starting document once (templates mint fresh block ids, so this
+    // must not re-run on every render).
+    const [initial] = useState(() => initialStateForEntry(entry));
+    const [content, setContent] = useState<SiteContent>(initial.content);
+    const [mode, setMode] = useState<EditorMode>(initial.mode);
+    const [markdownText, setMarkdownText] = useState(initial.markdownText);
     // HTML mode panes: body markup, stylesheet, script — CodePen-style.
-    const [htmlText, setHtmlText] = useState(initialDraft?.htmlText ?? "");
-    const [cssText, setCssText] = useState(initialDraft?.cssText ?? "");
-    const [jsText, setJsText] = useState(initialDraft?.jsText ?? "");
+    const [htmlText, setHtmlText] = useState(initial.htmlText);
+    const [cssText, setCssText] = useState(initial.cssText);
+    const [jsText, setJsText] = useState(initial.jsText);
     const [htmlPane, setHtmlPane] = useState<HtmlPane>("html");
     const [view, setView] = useState<View>("edit");
     const [domain, setDomain] = useState("");
@@ -427,25 +370,13 @@ export default function App() {
     const draftRef = useRef(draft);
     draftRef.current = draft;
     useEffect(() => {
-        const t = setTimeout(() => {
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
-            } catch {
-                // Storage full/unavailable — autosave is best-effort.
-            }
-        }, 500);
+        const t = setTimeout(() => saveDraft(entry.id, draft), 500);
         return () => clearTimeout(t);
-    }, [mode, content, markdownText, htmlText, cssText, jsText]);
+    }, [mode, content, markdownText, htmlText, cssText, jsText]); // eslint-disable-line react-hooks/exhaustive-deps
     // Flush synchronously when the page is leaving/backgrounding, so an edit
     // made within the debounce window survives a reload or mobile app-switch.
     useEffect(() => {
-        const flush = () => {
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(draftRef.current));
-            } catch {
-                // best-effort
-            }
-        };
+        const flush = () => saveDraft(entry.id, draftRef.current);
         const onVisibility = () => {
             if (document.visibilityState === "hidden") flush();
         };
@@ -524,12 +455,15 @@ export default function App() {
 
     // The single HTML source of truth — preview and deploy both consume this,
     // so they stay mode-agnostic.
-    const currentHtml = (): string => {
+    // `interactive` is false only for the live preview iframe, so the baked
+    // dotpages credit doesn't navigate while you're still in the editor.
+    // Deploy/size all use the default (true) — the real, host-aware badge ships.
+    const currentHtml = (interactive = true): string => {
         switch (mode) {
             case "blocks":
                 return renderHtml(content);
             case "markdown":
-                return renderMarkdownHtml(markdownText, content);
+                return renderMarkdownHtml(markdownText, content, interactive);
             case "html":
                 return assembleDocument({
                     title: escapeHtml(titleFromHtml(htmlText)),
@@ -751,6 +685,8 @@ export default function App() {
                 updateDeployStatus,
             );
             setResult(stored);
+            // Feed the landing page's "Your sites" list (local, this device).
+            if (stored.dotMapped) recordDeployedSite(stored.domain, stored.gatewayUrl);
         } catch (cause) {
             setDeployError(cause instanceof Error ? cause.message : String(cause));
         } finally {
@@ -831,6 +767,7 @@ export default function App() {
                             }
                         >
                             <CodeEditor
+                                cacheKey={entry.id}
                                 language={mode === "markdown" ? "markdown" : htmlPane}
                                 value={
                                     mode === "markdown"
@@ -869,7 +806,7 @@ export default function App() {
                     <iframe
                         className="site-frame"
                         title="Site preview"
-                        srcDoc={currentHtml()}
+                        srcDoc={currentHtml(false)}
                         sandbox="allow-scripts allow-popups"
                     />
                 ))}
@@ -895,17 +832,13 @@ export default function App() {
                             paragraphs, links, or images — make it your own.
                         </p>
                     )}
-                    {/* Mirrors the footer wrapMain() bakes into the artifact. */}
+                    {/* Mirrors the footer wrapMain() bakes into the artifact, but
+                        intentionally INERT here: this is the author's own canvas
+                        and the credit only needs to be clickable for visitors on
+                        the deployed site. An href-less <a> keeps the styling. */}
                     <footer className="site-footer">
                         made with{" "}
-                        <a
-                            href="https://github.com/shawntabrizi/hello-playground"
-                            target="_blank"
-                            rel="noopener"
-                            style={{ color: content.accentColor }}
-                        >
-                            hello-playground
-                        </a>
+                        <a style={{ color: content.accentColor }}>dotpages.dot</a>
                     </footer>
                 </article>
             </main>
@@ -1397,6 +1330,12 @@ export default function App() {
             <nav className="bottom-nav" aria-label="View">
                 <div className="bottom-nav-pill">
                     <NavTab
+                        active={false}
+                        onClick={onExit}
+                        icon={<BackIcon />}
+                        label="Start"
+                    />
+                    <NavTab
                         active={view === "edit"}
                         onClick={() => {
                             setView("edit");
@@ -1429,6 +1368,55 @@ export default function App() {
     );
 }
 
+// App entry: the landing page (drafts + templates), with the editor taking
+// over once the user picks a starting point. Mirrors the integrated build's
+// BuilderTab, minus react-router — this app's landing IS its home.
+export default function App() {
+    const [entry, setEntry] = useState<BuilderEntry | null>(null);
+    const [drafts, setDrafts] = useState(() => loadDrafts());
+    // Delete acts immediately with a 6s undo window; the deleted card's slot
+    // renders the undo affordance in place.
+    const [undoable, setUndoable] = useState<{ record: DraftRecord; index: number } | null>(null);
+    const undoTimer = useRef<number | null>(null);
+    const handleDelete = (record: DraftRecord, index: number) => {
+        deleteDraft(record.id);
+        setDrafts(loadDrafts());
+        setUndoable({ record, index });
+        if (undoTimer.current) clearTimeout(undoTimer.current);
+        undoTimer.current = window.setTimeout(() => setUndoable(null), 6000);
+    };
+    const handleUndo = () => {
+        if (!undoable) return;
+        if (undoTimer.current) clearTimeout(undoTimer.current);
+        restoreDraft(undoable.record);
+        setDrafts(loadDrafts());
+        setUndoable(null);
+    };
+    // Re-read drafts whenever we return to the landing, so a just-exited
+    // session's autosave shows up (the editor flushes on unmount/pagehide).
+    useEffect(() => {
+        if (entry === null) setDrafts(loadDrafts());
+    }, [entry]);
+
+    if (!entry)
+        return (
+            <Landing
+                drafts={drafts}
+                onPick={setEntry}
+                onDelete={handleDelete}
+                undoable={undoable}
+                onUndo={handleUndo}
+            />
+        );
+    // Keyed on entry.id so picking a different start fully remounts the editor.
+    return <Editor key={entry.id} entry={entry} onExit={() => setEntry(null)} />;
+}
+
+// How long a single deploy step may run before the progress UI adds a "still
+// working" reassurance. The eased fill (progress.ts) is flat near its cap by
+// ~25s, so a step sitting past this should be told it isn't frozen.
+const SLOW_STEP_HINT_MS = 18_000;
+
 function StepProgress({
     steps,
     step,
@@ -1440,6 +1428,27 @@ function StepProgress({
 }) {
     const currentStep = steps[Math.min(step, steps.length - 1)];
     const stepNumber = Math.min(step + 1, steps.length);
+
+    // Eased within-step fill for the active segment. The chain layer gives no
+    // sub-progress for the slow broadcast/in-block wait, so we animate EXPECTED
+    // progress (see progress.ts) — fast early, slowing as it climbs — to read as
+    // "working" rather than "frozen". Re-armed whenever `step` advances; the
+    // segment flipping to is-complete is the real "snap to done".
+    const [activeFill, setActiveFill] = useState(0);
+    // A step that runs past this reads as "stuck" — the eased fill has long
+    // since flattened near its cap. Show a brief reassurance line.
+    const [slow, setSlow] = useState(false);
+    useEffect(() => {
+        setActiveFill(0);
+        setSlow(false);
+        const start = performance.now();
+        const id = window.setInterval(() => {
+            const elapsed = performance.now() - start;
+            setActiveFill(easedStepProgress(elapsed, PROGRESS_TAU_MS));
+            if (elapsed > SLOW_STEP_HINT_MS) setSlow(true);
+        }, 150);
+        return () => window.clearInterval(id);
+    }, [step]);
 
     return (
         <div className="deploy-progress" role="status" aria-live="polite">
@@ -1466,10 +1475,22 @@ function StepProgress({
                             .filter(Boolean)
                             .join(" ")}
                         aria-hidden="true"
-                    />
+                    >
+                        {index === step && (
+                            <span
+                                className="progress-segment-fill"
+                                style={{ width: `${Math.round(activeFill * 100)}%` }}
+                            />
+                        )}
+                    </span>
                 ))}
             </div>
             <div className="status">{status}</div>
+            {slow && (
+                <div className="progress-slow-hint" role="status">
+                    Still working — this can take a moment.
+                </div>
+            )}
         </div>
     );
 }
@@ -2181,6 +2202,13 @@ function CodeIcon() {
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <polyline points="16 18 22 12 16 6" />
             <polyline points="8 6 2 12 8 18" />
+        </svg>
+    );
+}
+function BackIcon() {
+    return (
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M15 18l-6-6 6-6" />
         </svg>
     );
 }

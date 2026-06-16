@@ -68,15 +68,21 @@ function titleFromMarkdown(markdown: string): string {
     return m ? m[1].trim() : "hello";
 }
 
-export function renderMarkdownParts(markdown: string, theme: PageTheme): DocumentParts {
+// `interactive` is threaded to wrapMain: false for the editor's live preview
+// iframe (inert credit), true (default) for the deployed artifact.
+export function renderMarkdownParts(
+    markdown: string,
+    theme: PageTheme,
+    interactive = true,
+): DocumentParts {
     const body = marked.parse(markdown, { async: false });
     return {
         title: escapeHtml(titleFromMarkdown(markdown)),
         css: shellCss(theme, ["markdown"]),
-        bodyHtml: wrapMain(body),
+        bodyHtml: wrapMain(body, interactive),
     };
 }
 
-export function renderMarkdownHtml(markdown: string, theme: PageTheme): string {
-    return assembleDocument(renderMarkdownParts(markdown, theme));
+export function renderMarkdownHtml(markdown: string, theme: PageTheme, interactive = true): string {
+    return assembleDocument(renderMarkdownParts(markdown, theme, interactive));
 }

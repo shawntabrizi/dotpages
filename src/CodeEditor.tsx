@@ -58,10 +58,14 @@ const LANGUAGES: Record<CodeLanguage, () => ReturnType<typeof html>> = {
 };
 
 const HISTORY_FIELDS = { history: historyField };
-// Serialized EditorState JSON per pane, surviving unmounts for the session.
-const stateCache = new Map<CodeLanguage, unknown>();
+// Serialized EditorState JSON, surviving unmounts for the session. Keyed by
+// "<cacheKey>:<language>" so undo history is preserved across pane switches
+// WITHIN a draft, but never leaks between drafts (the editor remounts per
+// entry, but this module-level map outlives the remount).
+const stateCache = new Map<string, unknown>();
 
 export default function CodeEditor({
+    cacheKey,
     language,
     value,
     onChange,
@@ -69,6 +73,8 @@ export default function CodeEditor({
     placeholder,
     onHandle,
 }: {
+    /** Draft id — scopes the undo-history cache so it never leaks between drafts. */
+    cacheKey: string;
     language: CodeLanguage;
     value: string;
     onChange: (next: string) => void;
@@ -91,6 +97,7 @@ export default function CodeEditor({
     // pane's cached history when there is one.
     useEffect(() => {
         if (!hostRef.current) return;
+        const paneKey = `${cacheKey}:${language}`;
         const extensions = [
             lineNumbers(),
             history(),
@@ -115,7 +122,7 @@ export default function CodeEditor({
         ];
 
         let state: EditorState | null = null;
-        const cached = stateCache.get(language);
+        const cached = stateCache.get(paneKey);
         if (cached) {
             try {
                 state = EditorState.fromJSON(cached, { extensions }, HISTORY_FIELDS);
@@ -144,12 +151,12 @@ export default function CodeEditor({
             canRedo: () => redoDepth(view.state) > 0,
         });
         return () => {
-            stateCache.set(language, view.state.toJSON(HISTORY_FIELDS));
+            stateCache.set(paneKey, view.state.toJSON(HISTORY_FIELDS));
             onHandleRef.current?.(null);
             view.destroy();
             viewRef.current = null;
         };
-    }, [language, placeholder, ariaLabel]);
+    }, [cacheKey, language, placeholder, ariaLabel]);
 
     // External value changes (e.g. re-converting) sync into the live view.
     useEffect(() => {
