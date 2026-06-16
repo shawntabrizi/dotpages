@@ -455,12 +455,15 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
 
     // The single HTML source of truth — preview and deploy both consume this,
     // so they stay mode-agnostic.
-    const currentHtml = (): string => {
+    // `interactive` is false only for the live preview iframe, so the baked
+    // dotpages credit doesn't navigate while you're still in the editor.
+    // Deploy/size all use the default (true) — the real, host-aware badge ships.
+    const currentHtml = (interactive = true): string => {
         switch (mode) {
             case "blocks":
                 return renderHtml(content);
             case "markdown":
-                return renderMarkdownHtml(markdownText, content);
+                return renderMarkdownHtml(markdownText, content, interactive);
             case "html":
                 return assembleDocument({
                     title: escapeHtml(titleFromHtml(htmlText)),
@@ -803,7 +806,7 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                     <iframe
                         className="site-frame"
                         title="Site preview"
-                        srcDoc={currentHtml()}
+                        srcDoc={currentHtml(false)}
                         sandbox="allow-scripts allow-popups"
                     />
                 ))}
@@ -829,17 +832,13 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                             paragraphs, links, or images — make it your own.
                         </p>
                     )}
-                    {/* Mirrors the footer wrapMain() bakes into the artifact. */}
+                    {/* Mirrors the footer wrapMain() bakes into the artifact, but
+                        intentionally INERT here: this is the author's own canvas
+                        and the credit only needs to be clickable for visitors on
+                        the deployed site. An href-less <a> keeps the styling. */}
                     <footer className="site-footer">
                         made with{" "}
-                        <a
-                            href="https://github.com/shawntabrizi/hello-playground"
-                            target="_blank"
-                            rel="noopener"
-                            style={{ color: content.accentColor }}
-                        >
-                            hello-playground
-                        </a>
+                        <a style={{ color: content.accentColor }}>dotpages.dot</a>
                     </footer>
                 </article>
             </main>

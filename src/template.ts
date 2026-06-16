@@ -361,10 +361,38 @@ ${bodyHtml}${script}
 
 // Body wrapper shared by the blocks and markdown renderers: the centered
 // column plus the attribution footer.
-export function wrapMain(inner: string): string {
+//
+// No target="_blank": the artifact is viewed inside Polkadot hosts too, where
+// _blank taps are dead. The credit's DEFAULT href is the public `.dot.li`
+// gateway (the only form a plain browser resolves); inside a host that gateway
+// is just an external website that would open the OS browser, so the tiny
+// inline script rewrites it to the native `dotpages.dot` the host resolves
+// itself. The host is detected from how the PAGE loaded — a native `.dot`
+// hostname, the `polkadot://` scheme, or the mobile webview mark.
+// `interactive` is false for the editor's live preview iframe, where the credit
+// must not navigate; true (default) for the deployed artifact.
+export function wrapMain(inner: string, interactive = true): string {
+    const credit = interactive
+        ? `<footer>made with <a id="dp-credit" href="https://dotpages.dot.li">dotpages.dot</a></footer>
+    <script>
+    (function () {
+      try {
+        var l = window.location;
+        var inHost =
+          l.protocol === "polkadot:" ||
+          /(^|\\.)dot$/.test(l.hostname) ||
+          window.__HOST_WEBVIEW_MARK__ === true;
+        if (inHost) {
+          var a = document.getElementById("dp-credit");
+          if (a) a.setAttribute("href", "https://dotpages.dot");
+        }
+      } catch (e) {}
+    })();
+    </script>`
+        : `<footer>made with <a>dotpages.dot</a></footer>`;
     return `<main>
     ${inner}
-    <footer>made with <a href="https://github.com/shawntabrizi/hello-playground" target="_blank" rel="noopener">hello-playground</a></footer>
+    ${credit}
 </main>`;
 }
 
