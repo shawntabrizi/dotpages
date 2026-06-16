@@ -156,6 +156,13 @@ function safeImageUrl(raw: string): string {
     return safeUrl(v);
 }
 
+// "No image picked yet" sentinel — templates and the + menu prefill image
+// blocks with "https://" so the URL field starts as a useful stub. The
+// editor's blocks view and the artifact renderer share this predicate.
+export function isPlaceholderImageUrl(url: string): boolean {
+    return !url || url === "https://";
+}
+
 function renderBlock(block: Block): string {
     switch (block.type) {
         case "heading":
@@ -173,7 +180,10 @@ function renderBlock(block: Block): string {
             if (/^mailto:/i.test(href)) {
                 return `<p${wrap}><!--email_off--><a href="${href}">${escapeHtml(block.label)}</a><!--/email_off--></p>`;
             }
-            return `<p${wrap}><a href="${href}" target="_blank" rel="noopener">${escapeHtml(block.label)}</a></p>`;
+            // No target="_blank": dead taps inside Polkadot hosts (neither
+            // mobile WebView wires window-opening) — same-tab navigation
+            // traverses the host's interception, and works in a plain browser.
+            return `<p${wrap}><a href="${href}" rel="noopener">${escapeHtml(block.label)}</a></p>`;
         }
         case "image": {
             const size = imageSize(block.variant);
@@ -182,6 +192,14 @@ function renderBlock(block: Block): string {
                 ...(size !== "large" ? [`img-${size}`] : []),
                 ...(shape !== "rounded" ? [`img-${shape}`] : []),
             ];
+            // No real URL yet: a broken <img> renders as bare alt text. Emit
+            // a tinted shape in the image's size/shape instead so previews
+            // (and a deployed draft) read as intentional, not broken.
+            if (isPlaceholderImageUrl(block.url)) {
+                const label = escapeHtml(block.alt || "Image");
+                const cls = ["img-placeholder", ...classes].join(" ");
+                return `<div class="${cls}" role="img" aria-label="${label}">${label}</div>`;
+            }
             const cls = classes.length ? ` class="${classes.join(" ")}"` : "";
             return `<img${cls} src="${safeImageUrl(block.url)}" alt="${escapeHtml(block.alt)}">`;
         }
@@ -210,6 +228,7 @@ export type ShellFeature =
     | "img-medium"
     | "img-circle"
     | "img-square"
+    | "img-placeholder"
     | "pill";
 
 interface FeatureCssContext {
@@ -236,6 +255,22 @@ pre code { background: none; padding: 0; }`,
     border-radius: 50%;
 }`,
     "img-square": () => `img.img-square { border-radius: 0; }`,
+    "img-placeholder": ({ divider }) => `.img-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 3 / 2;
+    margin: 16px auto;
+    border-radius: 12px;
+    background: ${divider};
+    font-size: 13px;
+    opacity: 0.8;
+}
+.img-placeholder.img-small { width: min(256px, 100%); aspect-ratio: 1; }
+.img-placeholder.img-medium { width: min(512px, 100%); }
+.img-placeholder.img-circle { aspect-ratio: 1; border-radius: 50%; }
+.img-placeholder.img-square { border-radius: 0; }`,
     pill: ({ accent, accentContrast }) => `p.pill { margin: 16px 0; }
 p.pill a {
     display: block;
@@ -344,6 +379,8 @@ export function renderHtmlParts(content: SiteContent): DocumentParts {
     if (sizes.includes("medium")) features.push("img-medium");
     if (shapes.includes("circle")) features.push("img-circle");
     if (shapes.includes("square")) features.push("img-square");
+    if (images.some((b) => b.type === "image" && isPlaceholderImageUrl(b.url)))
+        features.push("img-placeholder");
     if (content.blocks.some((b) => b.type === "link" && b.variant === "pill"))
         features.push("pill");
 
