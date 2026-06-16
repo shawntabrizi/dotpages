@@ -764,6 +764,7 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                             }
                         >
                             <CodeEditor
+                                cacheKey={entry.id}
                                 language={mode === "markdown" ? "markdown" : htmlPane}
                                 value={
                                     mode === "markdown"
