@@ -905,13 +905,33 @@ body {
     background: var(--accent);
     border-color: transparent;
 }
+/* Active segment is the TRACK; .progress-segment-fill grows inside it to show
+   eased within-step progress (see progress.ts / StepProgress). */
 .progress-segment.is-active {
-    background: var(--accent);
+    background: rgba(255,255,255,0.12);
     border-color: transparent;
+    position: relative;
+    overflow: hidden;
+}
+.progress-segment-fill {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    /* Smooth the 150ms sampling into a continuous creep. */
+    transition: width 0.18s linear;
+    /* Keep the "alive" pulse the active segment used to carry. */
     animation: progress-pulse 1.2s ease-in-out infinite;
 }
 
 .status {
+    color: var(--chrome-text2);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+/* Reassurance when a step runs long — muted, not alarming. */
+.progress-slow-hint {
     color: var(--chrome-text2);
     font-size: 12px;
     line-height: 1.4;
@@ -923,7 +943,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .progress-segment.is-active { animation: none; }
+    .progress-segment-fill { animation: none; transition: none; }
 }
 
 /* Copyable account address — the exact string to paste into faucets. */

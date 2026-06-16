@@ -63,6 +63,7 @@ import {
 } from "./draft.ts";
 import Landing from "./Landing.tsx";
 import { recordDeployedSite } from "./deployed.ts";
+import { easedStepProgress, PROGRESS_TAU_MS } from "./progress.ts";
 
 type View = "edit" | "preview" | "deploy";
 // The one-way "eject" ladder: blocks → markdown → html are exact conversions;
@@ -1411,6 +1412,11 @@ export default function App() {
     return <Editor key={entry.id} entry={entry} onExit={() => setEntry(null)} />;
 }
 
+// How long a single deploy step may run before the progress UI adds a "still
+// working" reassurance. The eased fill (progress.ts) is flat near its cap by
+// ~25s, so a step sitting past this should be told it isn't frozen.
+const SLOW_STEP_HINT_MS = 18_000;
+
 function StepProgress({
     steps,
     step,
@@ -1422,6 +1428,27 @@ function StepProgress({
 }) {
     const currentStep = steps[Math.min(step, steps.length - 1)];
     const stepNumber = Math.min(step + 1, steps.length);
+
+    // Eased within-step fill for the active segment. The chain layer gives no
+    // sub-progress for the slow broadcast/in-block wait, so we animate EXPECTED
+    // progress (see progress.ts) — fast early, slowing as it climbs — to read as
+    // "working" rather than "frozen". Re-armed whenever `step` advances; the
+    // segment flipping to is-complete is the real "snap to done".
+    const [activeFill, setActiveFill] = useState(0);
+    // A step that runs past this reads as "stuck" — the eased fill has long
+    // since flattened near its cap. Show a brief reassurance line.
+    const [slow, setSlow] = useState(false);
+    useEffect(() => {
+        setActiveFill(0);
+        setSlow(false);
+        const start = performance.now();
+        const id = window.setInterval(() => {
+            const elapsed = performance.now() - start;
+            setActiveFill(easedStepProgress(elapsed, PROGRESS_TAU_MS));
+            if (elapsed > SLOW_STEP_HINT_MS) setSlow(true);
+        }, 150);
+        return () => window.clearInterval(id);
+    }, [step]);
 
     return (
         <div className="deploy-progress" role="status" aria-live="polite">
@@ -1448,10 +1475,22 @@ function StepProgress({
                             .filter(Boolean)
                             .join(" ")}
                         aria-hidden="true"
-                    />
+                    >
+                        {index === step && (
+                            <span
+                                className="progress-segment-fill"
+                                style={{ width: `${Math.round(activeFill * 100)}%` }}
+                            />
+                        )}
+                    </span>
                 ))}
             </div>
             <div className="status">{status}</div>
+            {slow && (
+                <div className="progress-slow-hint" role="status">
+                    Still working — this can take a moment.
+                </div>
+            )}
         </div>
     );
 }
