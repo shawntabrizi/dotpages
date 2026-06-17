@@ -8,6 +8,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { truncateAddress } from "@parity/product-sdk-address";
+import { avatarColors, avatarInitial } from "./avatar.ts";
+import { copyText } from "./clipboard.ts";
 import {
     connectExtension,
     disconnect,
@@ -26,11 +28,94 @@ const SOURCE_LABEL: Record<string, string> = {
     dev: "Dev account",
 };
 
+// Small inline glyphs — keeps the widget dependency-free (no icon library).
+function ChevronIcon() {
+    return (
+        <svg className="account-caret" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path
+                d="M4 6l4 4 4-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+        </svg>
+    );
+}
+function UserIcon() {
+    return (
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <circle cx="8" cy="5" r="2.6" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <path
+                d="M3 13.2c0-2.5 2.2-3.8 5-3.8s5 1.3 5 3.8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+            />
+        </svg>
+    );
+}
+function CopyIcon({ done }: { done: boolean }) {
+    return done ? (
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+            <path
+                d="M3.5 8.5l3 3 6-6.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+        </svg>
+    ) : (
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+            <rect x="5.5" y="5.5" width="8" height="8" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.4" />
+            <path
+                d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+        </svg>
+    );
+}
+
+/** Gradient identity chip derived from the address, with a source-coloured
+ *  presence badge. `size` drives the trigger (sm) vs menu-header (lg) variants. */
+function Avatar({
+    seed,
+    initial,
+    source,
+    size,
+}: {
+    seed: string;
+    initial: string;
+    source: string;
+    size: "sm" | "lg";
+}) {
+    const { from, to } = avatarColors(seed);
+    return (
+        <span
+            className={`account-avatar account-avatar-${size}`}
+            style={{ background: `linear-gradient(135deg, ${from}, ${to})` }}
+            aria-hidden="true"
+        >
+            {initial}
+            <span className={`account-presence source-${source}`} />
+        </span>
+    );
+}
+
 export default function AccountBar() {
     const { activeAccount, source, resolving, hostSignedOut, hasExtension, usingDev, error } =
         useAccountSession();
     const [open, setOpen] = useState(false);
     const [busy, setBusy] = useState(false);
+    const [copied, setCopied] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
 
     // Close the menu on an outside click / Escape.
@@ -59,27 +144,49 @@ export default function AccountBar() {
         }
     };
 
-    const triggerLabel = activeAccount
-        ? activeAccount.displayName
-        : resolving
-          ? "Connecting…"
-          : "Sign in";
+    const copyAddress = async () => {
+        if (!activeAccount) return;
+        if (await copyText(activeAccount.address)) {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1300);
+        }
+    };
+
+    const src = source ?? "none";
+    const connecting = resolving && !activeAccount;
 
     return (
         <div className="account-bar" ref={ref}>
             <button
                 type="button"
-                className="account-trigger"
+                className={[
+                    "account-trigger",
+                    activeAccount ? "is-active" : "is-signin",
+                    open ? "is-open" : "",
+                ]
+                    .filter(Boolean)
+                    .join(" ")}
                 onClick={() => setOpen((o) => !o)}
                 aria-haspopup="menu"
                 aria-expanded={open}
-                disabled={resolving && !activeAccount}
+                disabled={connecting}
             >
-                <span className={`source-dot source-${source ?? "none"}`} aria-hidden="true" />
-                <span className="account-trigger-name">{triggerLabel}</span>
-                <span className="account-caret" aria-hidden="true">
-                    ▾
+                {activeAccount ? (
+                    <Avatar
+                        seed={activeAccount.address}
+                        initial={avatarInitial(activeAccount.displayName)}
+                        source={src}
+                        size="sm"
+                    />
+                ) : (
+                    <span className="account-trigger-icon" aria-hidden="true">
+                        <UserIcon />
+                    </span>
+                )}
+                <span className="account-trigger-name">
+                    {activeAccount ? activeAccount.displayName : connecting ? "Connecting…" : "Sign in"}
                 </span>
+                <ChevronIcon />
             </button>
 
             {open && (
@@ -87,43 +194,71 @@ export default function AccountBar() {
                     {activeAccount ? (
                         <>
                             <div className="account-menu-head">
-                                <span
-                                    className={`source-dot source-${source ?? "none"}`}
-                                    aria-hidden="true"
+                                <Avatar
+                                    seed={activeAccount.address}
+                                    initial={avatarInitial(activeAccount.displayName)}
+                                    source={src}
+                                    size="lg"
                                 />
                                 <div className="account-menu-id">
                                     <div className="account-menu-name">
                                         {activeAccount.displayName}
                                     </div>
-                                    <div className="account-menu-meta">
-                                        {SOURCE_LABEL[source ?? ""] ?? "Account"} ·{" "}
-                                        {truncateAddress(activeAccount.address)}
+                                    <div className="account-menu-source">
+                                        <span className={`source-dot source-${src}`} aria-hidden="true" />
+                                        {SOURCE_LABEL[src] ?? "Account"}
                                     </div>
                                 </div>
                             </div>
-                            {hasExtension && source !== "extension" && (
+
+                            <button
+                                type="button"
+                                className="account-address"
+                                onClick={copyAddress}
+                                title="Copy address"
+                            >
+                                <span className="account-address-text">
+                                    {truncateAddress(activeAccount.address)}
+                                </span>
+                                <span className={`account-address-copy${copied ? " is-done" : ""}`}>
+                                    <CopyIcon done={copied} />
+                                    {copied ? "Copied" : "Copy"}
+                                </span>
+                            </button>
+
+                            <div className="account-menu-actions">
+                                {hasExtension && source !== "extension" && (
+                                    <button
+                                        type="button"
+                                        className="account-menu-action"
+                                        disabled={busy}
+                                        onClick={() => run(connectExtension)}
+                                    >
+                                        Switch to wallet
+                                    </button>
+                                )}
                                 <button
                                     type="button"
                                     className="account-menu-action"
-                                    disabled={busy}
-                                    onClick={() => run(connectExtension)}
+                                    onClick={() => {
+                                        disconnect();
+                                        setOpen(false);
+                                    }}
                                 >
-                                    Switch to wallet
+                                    Sign out
                                 </button>
-                            )}
-                            <button
-                                type="button"
-                                className="account-menu-action"
-                                onClick={() => {
-                                    disconnect();
-                                    setOpen(false);
-                                }}
-                            >
-                                Sign out
-                            </button>
+                            </div>
                         </>
                     ) : (
                         <>
+                            <div className="account-menu-prompt">
+                                <span className="account-menu-prompt-title">
+                                    Connect your account
+                                </span>
+                                <span className="account-menu-prompt-sub">
+                                    Sign in to deploy and manage your sites.
+                                </span>
+                            </div>
                             {hostSignedOut && (
                                 <button
                                     type="button"
@@ -156,7 +291,8 @@ export default function AccountBar() {
                     )}
 
                     {/* Dev account: a subtle local-testing fallback, available in
-                        every state. */}
+                        every state — demoted to a divided footer so it stays out
+                        of the way of the real sign-in path. */}
                     <label className="account-dev-toggle">
                         <input
                             type="checkbox"

@@ -21,6 +21,11 @@ import { AccountId, type PolkadotSigner } from "polkadot-api";
 
 const DEFAULT_PRODUCT_ACCOUNT_DOT_NS = "dotpages.dot";
 const PRODUCT_ACCOUNT_DERIVATION_INDEX = 0;
+// Silent host-account resolution must not hang the UI on "Connecting…". Some
+// hosts never answer getProductAccount for an identifier they can't resolve
+// (e.g. a localhost dev origin), leaving the promise pending forever. Cap it so
+// the widget falls back to an explicit "Sign in to Polkadot" CTA instead.
+const HOST_CONNECT_TIMEOUT_MS = 6000;
 
 function isLoopback(hostname: string): boolean {
     return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -30,8 +35,11 @@ export function getProductAccountIdentifier(): string {
     const configured = import.meta.env.VITE_PRODUCT_ACCOUNT_ID?.trim();
     if (configured) return configured;
 
-    const { host, hostname } = window.location;
-    if (isLoopback(hostname)) return host;
+    const { hostname } = window.location;
+    // A loopback dev origin (localhost:5173) is not a product the host can
+    // resolve — asking for it leaves getProductAccount hanging. Fall back to
+    // the canonical product so localhost-in-host can authenticate as dotpages.
+    if (isLoopback(hostname)) return DEFAULT_PRODUCT_ACCOUNT_DOT_NS;
 
     // dotli exposes hosted products as `<name>.<gateway>` (e.g.
     // `dotpages.dot.li`). Map back to the canonical `<name>.dot`
@@ -88,10 +96,19 @@ export async function connectHostAccount(): Promise<HostState> {
 
     try {
         const identifier = getProductAccountIdentifier();
-        const result = await accountsProvider.getProductAccount(
-            identifier,
-            PRODUCT_ACCOUNT_DERIVATION_INDEX,
-        );
+        const timeout = Symbol("timeout");
+        const result = await Promise.race([
+            accountsProvider.getProductAccount(identifier, PRODUCT_ACCOUNT_DERIVATION_INDEX),
+            new Promise<typeof timeout>((resolve) =>
+                setTimeout(() => resolve(timeout), HOST_CONNECT_TIMEOUT_MS),
+            ),
+        ]);
+        // No answer in time → treat as "no host session" so the UI offers a
+        // sign-in CTA (which the user can retry) rather than hanging.
+        if (result === timeout) {
+            setState({ status: "signed-out", account: null, error: null });
+            return state;
+        }
         if (result.isErr()) {
             if (result.error instanceof RequestCredentialsErr.NotConnected) {
                 setState({ status: "signed-out", account: null, error: null });
