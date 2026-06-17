@@ -204,6 +204,13 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
     const [logsText, setLogsText] = useState<string | null>(null);
     // "Copied ✓" toggle for the success card's copy-link button.
     const [copiedUrl, setCopiedUrl] = useState(false);
+    // Post-deploy resolution: resolvers/gateways read the FINALIZED contenthash,
+    // which lags the best-block deploy by a finality window — so "Open your
+    // site" waits until the finalized contenthash equals the CID we wrote.
+    // Fail-open: a read error or 3 minutes flips it to "assumed" (open anyway).
+    const [liveState, setLiveState] = useState<"checking" | "confirmed" | "assumed">(
+        "checking",
+    );
     const [openMenu, setOpenMenu] = useState<ActionMenu | null>(null);
     // Which structured block (link/button/image) has its bottom sheet open.
     const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
@@ -762,6 +769,52 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
             // Clipboard unavailable — the link is still selectable text.
         }
     };
+    // Post-deploy "is it live yet" poll. Resolvers read the FINALIZED
+    // contenthash; the deploy confirms at best-block, so for one finality lag
+    // "Open your site" would point at a not-yet-resolvable page. Poll the
+    // finalized contenthash until it equals the CID we deployed; fail open
+    // after 3 minutes / on a read error. content-hash is dynamically imported
+    // so its chain deps stay out of the main chunk (matching the deploy path).
+    useEffect(() => {
+        if (!result?.dotMapped) return;
+        const addr = activeAccount?.address;
+        if (!addr) {
+            setLiveState("assumed");
+            return;
+        }
+        let cancelled = false;
+        setLiveState("checking");
+        const deadline = Date.now() + 180_000;
+        let interval: ReturnType<typeof setInterval> | null = null;
+        let want: string | null = null;
+        const stop = (state: "confirmed" | "assumed") => {
+            if (interval) clearInterval(interval);
+            interval = null;
+            if (!cancelled) setLiveState(state);
+        };
+        const tick = async () => {
+            if (cancelled) return;
+            try {
+                const { encodeIpfsContenthash, readContentHashFinalized } = await import(
+                    "./lib/dotns/content-hash.ts"
+                );
+                if (cancelled) return;
+                if (!want) want = encodeIpfsContenthash(result.cid).toLowerCase();
+                const onChain = await readContentHashFinalized(result.domain, addr);
+                if (cancelled) return;
+                if (onChain?.toLowerCase() === want) stop("confirmed");
+                else if (Date.now() > deadline) stop("assumed");
+            } catch {
+                stop("assumed");
+            }
+        };
+        void tick();
+        interval = setInterval(tick, 6000);
+        return () => {
+            cancelled = true;
+            if (interval) clearInterval(interval);
+        };
+    }, [result, activeAccount?.address]);
     const showOwnedHint =
         !useDevAccount &&
         !hostAccount &&
@@ -1158,7 +1211,11 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                             <span className="result-success-check" aria-hidden="true">
                                 <CheckIcon size={22} />
                             </span>
-                            <p className="result-success-title">Your site is live</p>
+                            <p className="result-success-title">
+                                {liveState === "checking"
+                                    ? "Your site is deployed"
+                                    : "Your site is live"}
+                            </p>
                             <p className="result-success-domain">
                                 {result.domain}.{DOT_HOST}
                                 <button
@@ -1171,17 +1228,27 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                                     {copiedUrl ? <CheckIcon size={15} /> : <CopyIcon />}
                                 </button>
                             </p>
-                            <p className="result-success-hint">
-                                Resolution can take a few seconds to propagate.
-                            </p>
-                            <a
-                                className="result-success-open"
-                                href={result.url}
-                                target="_blank"
-                                rel="noopener"
-                            >
-                                Open your site
-                            </a>
+                            {liveState === "checking" && (
+                                <p className="result-success-status" role="status" aria-live="polite">
+                                    <span className="result-success-dot" aria-hidden="true" />
+                                    going live — usually under a minute
+                                </p>
+                            )}
+                            {liveState === "assumed" && (
+                                <p className="result-success-hint">
+                                    If the link doesn't load yet, give it another minute and try again.
+                                </p>
+                            )}
+                            {liveState !== "checking" && (
+                                <a
+                                    className="result-success-open"
+                                    href={result.url}
+                                    target="_blank"
+                                    rel="noopener"
+                                >
+                                    Open your site
+                                </a>
+                            )}
                             <button
                                 type="button"
                                 className="result-success-another"
