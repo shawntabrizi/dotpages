@@ -4,11 +4,13 @@
 // — so we route through hostApi.navigateTo and the host's own browser handles
 // the URL (a `.dot` resolves natively; a `.dot.li` gateway URL resolves too).
 //
-// Ported from playground-app/src/builder/LinkPopup.tsx; uses the same
-// @novasamatech/host-api-wrapper this app already depends on for signing.
+// Ported from playground-app/src/builder/LinkPopup.tsx. Host detection uses
+// this app's canonical isInHost() (src/lib/host/detect.ts — the one place that
+// logic lives); only hostApi.navigateTo comes from @novasamatech/host-api-wrapper.
 
 import { type AnchorHTMLAttributes } from "react";
-import { hostApi, sandboxTransport } from "@novasamatech/host-api-wrapper";
+import { hostApi } from "@novasamatech/host-api-wrapper";
+import { isInHost } from "./lib/host/detect.ts";
 
 /** In-host navigation. Hand the host the FULL `https://name.dot.li` URL (the
  *  Android host can't resolve the bare `name.dot` form via navigateTo). On
@@ -30,7 +32,7 @@ function openInHost(url: string): void {
  *  form instead of a `.dot.li` gateway detour. Outside a host (or for non-dot
  *  links), the URL passes through unchanged. */
 export function hostLinkForm(url: string): string {
-    if (!sandboxTransport.isCorrectEnvironment()) return url;
+    if (!isInHost()) return url;
     try {
         const u = new URL(url);
         if (u.hostname.endsWith(".dot.li") || u.hostname.endsWith(".dot")) {
@@ -56,7 +58,7 @@ export function PopupLink(props: AnchorHTMLAttributes<HTMLAnchorElement>) {
             rel="noopener"
             onClick={(e) => {
                 onClick?.(e);
-                if (!href || !sandboxTransport.isCorrectEnvironment()) return;
+                if (!href || !isInHost()) return;
                 e.preventDefault();
                 openInHost(href);
             }}
