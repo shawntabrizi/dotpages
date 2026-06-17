@@ -28,6 +28,8 @@ import {
 import type { DeploySuccess } from "./deploy.ts";
 import { type PreflightReport, validateLabel } from "./preflight.ts";
 import { deployButtonState } from "./deployButton.ts";
+import { copyText } from "./clipboard.ts";
+import { checkBusyClearDelay } from "./checkVisibility.ts";
 import { deriveDomain } from "./derive-domain.ts";
 import { signInToHost, useHostState } from "./signer.ts";
 import { ensureHostPermission } from "./lib/host/permissions.ts";
@@ -357,6 +359,7 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
         setPreflightFailed(false);
         setResult(null); // inputs changed — a previous deploy result is stale
         const t = setTimeout(() => {
+            const startedAt = Date.now();
             import("./preflight.ts")
                 .then(({ runPreflight }) =>
                     runPreflight({
@@ -377,7 +380,13 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                     setCheckedLabel(effectiveLabel);
                 })
                 .finally(() => {
-                    if (!cancelled) setPreflightBusy(false);
+                    // Keep "Checking…" visible a minimum perceptible window so a
+                    // check that resolves instantly (cached / wedged-socket
+                    // reject) still paints feedback.
+                    const delay = checkBusyClearDelay(Date.now() - startedAt);
+                    setTimeout(() => {
+                        if (!cancelled) setPreflightBusy(false);
+                    }, delay);
                 });
         }, 400);
         return () => {
@@ -750,23 +759,16 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
     };
     const copyAddress = async () => {
         if (!activeAccount) return;
-        try {
-            await navigator.clipboard.writeText(activeAccount.address);
+        if (await copyText(activeAccount.address)) {
             setCopiedAddress(true);
             setTimeout(() => setCopiedAddress(false), 1500);
-        } catch {
-            // Clipboard unavailable (permissions/insecure context) — the
-            // address is still selectable text.
         }
     };
     const copyLiveUrl = async () => {
         if (!result) return;
-        try {
-            await navigator.clipboard.writeText(result.url);
+        if (await copyText(result.url)) {
             setCopiedUrl(true);
             setTimeout(() => setCopiedUrl(false), 1500);
-        } catch {
-            // Clipboard unavailable — the link is still selectable text.
         }
     };
     // Post-deploy "is it live yet" poll. Resolvers read the FINALIZED
@@ -1612,12 +1614,9 @@ function failureAction(message: string, fallback: string): string {
 function LogsModal({ text, onClose }: { text: string; onClose: () => void }) {
     const [copied, setCopied] = useState(false);
     const copy = async () => {
-        try {
-            await navigator.clipboard.writeText(text);
+        if (await copyText(text)) {
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
-        } catch {
-            // clipboard unavailable — the text is still selectable
         }
     };
     return (
