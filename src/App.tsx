@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Editable } from "./Editable.tsx";
 
 // Lazy: CodeMirror is its own chunk, fetched only when md/html mode is opened.
@@ -32,15 +32,9 @@ import { PopupLink } from "./LinkPopup.tsx";
 import { copyText } from "./clipboard.ts";
 import { checkBusyClearDelay } from "./checkVisibility.ts";
 import { deriveDomain } from "./derive-domain.ts";
-import { signInToHost, useHostState } from "./signer.ts";
 import { ensureHostPermission } from "./lib/host/permissions.ts";
-import {
-    type ActiveAccount,
-    getDevAccount,
-    hasInjectedExtension,
-    resolveHostAccount,
-    tryExtensionAccount,
-} from "./account.ts";
+import { ensureHostResolved, useAccountSession } from "./accountSession.ts";
+import AccountBar from "./AccountBar.tsx";
 import { MAX_TX_BYTES } from "./lib/bulletin/limits.ts";
 import { BULLETIN_FAUCET_URL, DOT_HOST } from "./lib/polkadot/constants.ts";
 import { MAX_IMAGE_DIMENSION, resizeImageToFit } from "./image-resize.ts";
@@ -231,71 +225,15 @@ function Editor({
     const toggleMenu = (menu: ActionMenu) =>
         setOpenMenu((prev) => (prev === menu ? null : menu));
 
-    // Signer state — host-first (this app's primary environment is Polkadot
-    // Desktop/Mobile), browser extension as standalone fallback, //Bob behind
-    // an explicit dev toggle.
-    const [useDevAccount, setUseDevAccount] = useState(false);
-    const [hostAccount, setHostAccount] = useState<ActiveAccount | null>(null);
-    const [extensionAccount, setExtensionAccount] = useState<ActiveAccount | null>(null);
-    const [resolvingOwned, setResolvingOwned] = useState(true);
-    const [ownedError, setOwnedError] = useState<string | null>(null);
+    // The active account comes from the app-wide session (shared with the
+    // homepage's AccountBar) — host / extension / dev, resolved once at boot.
+    const { activeAccount } = useAccountSession();
     /** Advisory remaining byte allowance — null when unknown, N/A (host
      *  route), or non-positive (the soft counters never gate anyway). */
     const [maxStoreBytes, setMaxStoreBytes] = useState<number | null>(null);
     /** Distinct from the budget: false = CHECKED and unauthorized (direct
      *  route would fail) — fail fast with the faucet link. null = unknown. */
     const [bulletinAuthorized, setBulletinAuthorized] = useState<boolean | null>(null);
-
-    const devAccount = useMemo(() => getDevAccount(), []);
-    const activeAccount: ActiveAccount | null = useDevAccount
-        ? devAccount
-        : hostAccount ?? extensionAccount;
-
-    // Resolve the host on mount — the default signer when running inside
-    // Polkadot Desktop/Mobile. Retries while the (async) mobile bridge
-    // injects; resolves to null quickly in a plain browser.
-    useEffect(() => {
-        let cancelled = false;
-        resolveHostAccount()
-            .then((account) => {
-                if (!cancelled && account) setHostAccount(account);
-            })
-            .catch((cause) => {
-                if (!cancelled)
-                    setOwnedError(cause instanceof Error ? cause.message : String(cause));
-            })
-            .finally(() => {
-                if (!cancelled) setResolvingOwned(false);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, []);
-
-    // Host session state — distinguishes "no host" from "host present but
-    // signed out of dotli" (the latter gets a sign-in CTA).
-    const hostState = useHostState();
-    const hostSignedOut = hostState.status === "signed-out";
-    const handleHostSignIn = async () => {
-        setOwnedError(null);
-        setResolvingOwned(true);
-        try {
-            const state = await signInToHost();
-            const account = state.account;
-            if (state.status === "ready" && account) {
-                setHostAccount({
-                    source: "host",
-                    address: account.address,
-                    displayName: account.displayName ?? account.address,
-                    signer: account.signer,
-                });
-            }
-        } catch (cause) {
-            setOwnedError(cause instanceof Error ? cause.message : String(cause));
-        } finally {
-            setResolvingOwned(false);
-        }
-    };
 
     useEffect(() => {
         const address = activeAccount?.address;
@@ -345,7 +283,6 @@ function Editor({
     const [recheckNonce, setRecheckNonce] = useState(0);
     // Reveals the developer-facing `tech` detail on each checklist row.
     const [showCheckDetails, setShowCheckDetails] = useState(false);
-    const [copiedAddress, setCopiedAddress] = useState(false);
     const effectiveLabel = domain.trim().replace(/\.dot$/i, "") || autoLabel || "";
 
     // Intentionally narrow deps: derive once, on the first visit to the
@@ -691,19 +628,6 @@ function Editor({
         }
     };
 
-    const connectExtension = async () => {
-        setOwnedError(null);
-        try {
-            const account = await tryExtensionAccount();
-            if (account) setExtensionAccount(account);
-            else
-                setOwnedError(
-                    "No browser wallet found. Install Talisman, SubWallet, or Polkadot.js — or tick the dev account checkbox.",
-                );
-        } catch (cause) {
-            setOwnedError(cause instanceof Error ? cause.message : String(cause));
-        }
-    };
 
     const deploy = async () => {
         setBusy(true);
@@ -774,13 +698,6 @@ function Editor({
         if (deployBtn.mode === "deploy") void deploy();
         else runCheck();
     };
-    const copyAddress = async () => {
-        if (!activeAccount) return;
-        if (await copyText(activeAccount.address)) {
-            setCopiedAddress(true);
-            setTimeout(() => setCopiedAddress(false), 1500);
-        }
-    };
     const copyLiveUrl = async () => {
         if (!result) return;
         if (await copyText(result.url)) {
@@ -834,13 +751,6 @@ function Editor({
             if (interval) clearInterval(interval);
         };
     }, [result, activeAccount?.address]);
-    const showOwnedHint =
-        !useDevAccount &&
-        !hostAccount &&
-        !extensionAccount &&
-        !resolvingOwned &&
-        !hostSignedOut; // signed-out gets the sign-in CTA instead
-
     const colors = siteColors(content.background);
     const foreground = content.textColor ?? colors.foreground;
     const siteStyle = {
@@ -1277,69 +1187,7 @@ function Editor({
 
                     <div className="deploy-field">
                         <span className="field-label">Account</span>
-                        <div className="account-row">
-                            <span className="account-chip">
-                                <span
-                                    className={`source-dot source-${activeAccount?.source ?? "none"}`}
-                                />
-                                {activeAccount
-                                    ? activeAccount.source === "dev"
-                                        ? activeAccount.displayName
-                                        : `${activeAccount.displayName} (${activeAccount.source})`
-                                    : resolvingOwned
-                                      ? "connecting…"
-                                      : "no signer"}
-                            </span>
-                            <label className="checkbox" title="Throwaway local signer — no wallet needed">
-                                <input
-                                    type="checkbox"
-                                    checked={useDevAccount}
-                                    onChange={(e) => setUseDevAccount(e.target.checked)}
-                                    disabled={busy}
-                                />
-                                <span>Dev account</span>
-                            </label>
-                        </div>
-                        {activeAccount && (
-                            <button
-                                type="button"
-                                className="account-address"
-                                onClick={copyAddress}
-                                title="Copy address"
-                            >
-                                <code>{activeAccount.address}</code>
-                                <span className="copy-state">
-                                    {copiedAddress ? "copied ✓" : "copy"}
-                                </span>
-                            </button>
-                        )}
-                        {!useDevAccount && !activeAccount && hostSignedOut && (
-                            <button
-                                className="pill pill-secondary"
-                                onClick={handleHostSignIn}
-                                disabled={resolvingOwned || busy}
-                            >
-                                Sign in to Polkadot
-                            </button>
-                        )}
-                        {!useDevAccount && !hostAccount && !extensionAccount && !hostSignedOut && (
-                            <button
-                                className="pill pill-secondary"
-                                onClick={connectExtension}
-                                disabled={!hasInjectedExtension() || resolvingOwned || busy}
-                            >
-                                Connect browser wallet
-                            </button>
-                        )}
-                        {showOwnedHint && (
-                            <p className="hint">
-                                No host signer detected. Open in{" "}
-                                <strong>Polkadot Desktop</strong> or{" "}
-                                <strong>Polkadot Mobile</strong>, connect a browser wallet,
-                                or tick the dev option below.
-                            </p>
-                        )}
-                        {ownedError && <p className="hint subtle">{ownedError}</p>}
+                        <AccountBar />
                     </div>
 
                     <div className="deploy-field">
@@ -1569,6 +1417,11 @@ export default function App() {
     useEffect(() => {
         if (entry === null) setDrafts(loadDrafts());
     }, [entry]);
+    // Resolve the account session once for the whole app — so the homepage's
+    // AccountBar shows who you're signed in as before you even enter the editor.
+    useEffect(() => {
+        void ensureHostResolved();
+    }, []);
 
     if (!entry)
         return (

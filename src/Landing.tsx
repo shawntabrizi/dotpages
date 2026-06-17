@@ -11,6 +11,7 @@
 
 import { useMemo, type ReactNode } from "react";
 import { PopupLink } from "./LinkPopup.tsx";
+import AccountBar from "./AccountBar.tsx";
 import { TEMPLATES } from "./templates.ts";
 import { renderHtml } from "./template.ts";
 import { iframesAllowed } from "./iframes.ts";
@@ -219,11 +220,14 @@ export default function Landing({
     return (
         <div className="builder-landing">
             <header className="builder-landing-header">
-                <h1 className="builder-landing-title">dotpages</h1>
-                <p className="builder-landing-lead">
-                    Build and launch your own decentralised website. Start from a
-                    template, or jump straight into Markdown or HTML.
-                </p>
+                <div className="builder-landing-headings">
+                    <h1 className="builder-landing-title">dotpages</h1>
+                    <p className="builder-landing-lead">
+                        Build and launch your own decentralised website. Start from a
+                        template, or jump straight into Markdown or HTML.
+                    </p>
+                </div>
+                <AccountBar />
             </header>
             {(drafts.length > 0 || undoable) && (
                 <section className="builder-section">
