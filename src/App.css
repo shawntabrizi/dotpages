@@ -1134,9 +1134,9 @@ body {
     }
 }
 
-/* ── Landing page (drafts + templates + your sites) ───────────────────────────
+/* Landing page (drafts + templates + your sites).
    Ported from playground-app/src/builder.css, mapped onto this app's tokens
-   (--chrome-*/--accent/--ok/--radius) instead of the playground design tokens.
+   (chrome, accent, ok, radius) instead of the playground design tokens.
    The playground-shell-only desktop "canvas" media block is intentionally
    omitted — this app's landing is a normal full-page scroll. */
 .builder-landing {

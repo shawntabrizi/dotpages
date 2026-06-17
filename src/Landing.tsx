@@ -218,7 +218,7 @@ export default function Landing({
     return (
         <div className="builder-landing">
             <header className="builder-landing-header">
-                <h1 className="builder-landing-title">Site builder</h1>
+                <h1 className="builder-landing-title">dotpages</h1>
                 <p className="builder-landing-lead">
                     Build and launch your own decentralised website. Start from a
                     template, or jump straight into Markdown or HTML.
