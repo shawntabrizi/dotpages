@@ -52,6 +52,7 @@ import {
 import {
     initialStateForEntry,
     saveDraft,
+    newDraftId,
     loadDrafts,
     deleteDraft,
     restoreDraft,
@@ -180,7 +181,17 @@ type BlockPreset = keyof typeof BLOCK_PRESETS;
 // The editor. Entered from the landing page with a BuilderEntry (resume a
 // draft, start from a template, or a blank markdown/html start). All edits
 // autosave into entry.id; `onExit` returns to the landing page.
-function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) {
+function Editor({
+    entry,
+    onExit,
+    onSwitchEntry,
+}: {
+    entry: BuilderEntry;
+    onExit: () => void;
+    /** Open a different draft in place of this one (used by the Simple→HTML
+     *  fork — the original draft is kept, a new one takes over the editor). */
+    onSwitchEntry: (entry: BuilderEntry) => void;
+}) {
     // Build the starting document once (templates mint fresh block ids, so this
     // must not re-run on every render).
     const [initial] = useState(() => initialStateForEntry(entry));
@@ -485,23 +496,28 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
         setMode("markdown");
         setOpenMenu(null);
     };
-    const convertToHtml = () => {
-        if (
-            !window.confirm(
-                "Convert to HTML, CSS & JS?\n\nYour page splits into editable HTML, CSS, and JavaScript panes. You can return to the simple editor later, but edits here won't carry back.",
-            )
-        )
-            return;
+    // Simple/Markdown → HTML FORKS a new draft instead of converting in place:
+    // the HTML version opens as its own draft and the original is kept untouched
+    // (HTML edits can't round-trip back, so destroying the source would be
+    // lossy). No confirm needed — nothing is lost.
+    const forkToHtml = () => {
         const parts =
             mode === "markdown"
                 ? renderMarkdownParts(markdownText, content)
                 : renderHtmlParts(content);
-        setHtmlText(parts.bodyHtml);
-        setCssText(parts.css);
-        setJsText("");
-        setHtmlPane("html");
-        setMode("html");
+        // Flush the current draft so the original is safely persisted before we
+        // hand the editor to the new HTML draft.
+        saveDraft(entry.id, draftRef.current);
+        const htmlDraft: Draft = {
+            mode: "html",
+            content,
+            markdownText: "",
+            htmlText: parts.bodyHtml,
+            cssText: parts.css,
+            jsText: "",
+        };
         setOpenMenu(null);
+        onSwitchEntry({ kind: "resume", id: newDraftId(), draft: htmlDraft });
     };
     const backToSimple = () => {
         if (
@@ -537,7 +553,7 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
             if (mode === "blocks") convertToMarkdown();
             else backToMarkdown();
         } else {
-            convertToHtml();
+            forkToHtml();
         }
     };
 
@@ -1409,7 +1425,14 @@ export default function App() {
             />
         );
     // Keyed on entry.id so picking a different start fully remounts the editor.
-    return <Editor key={entry.id} entry={entry} onExit={() => setEntry(null)} />;
+    return (
+        <Editor
+            key={entry.id}
+            entry={entry}
+            onExit={() => setEntry(null)}
+            onSwitchEntry={setEntry}
+        />
+    );
 }
 
 // How long a single deploy step may run before the progress UI adds a "still
