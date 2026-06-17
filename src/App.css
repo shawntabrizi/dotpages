@@ -1521,3 +1521,19 @@ body {
     white-space: pre-wrap;
     word-break: break-word;
 }
+
+/* "Developer details" toggle under the pre-flight checklist. */
+.check-details-toggle {
+    align-self: flex-start;
+    margin-top: 4px;
+    border: none;
+    background: transparent;
+    padding: 2px 0;
+    color: var(--chrome-text2);
+    font: inherit;
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+}
+.check-details-toggle:hover { color: var(--chrome-text); }
+.check-details-toggle.active { color: var(--chrome-text); }

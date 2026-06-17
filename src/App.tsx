@@ -322,6 +322,8 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
     // Bumped by "Check again" to force a re-run of the (otherwise input-driven)
     // pre-flight effect.
     const [recheckNonce, setRecheckNonce] = useState(0);
+    // Reveals the developer-facing `tech` detail on each checklist row.
+    const [showCheckDetails, setShowCheckDetails] = useState(false);
     const [copiedAddress, setCopiedAddress] = useState(false);
     const effectiveLabel = domain.trim().replace(/\.dot$/i, "") || autoLabel || "";
 
@@ -1298,7 +1300,9 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                                     </span>
                                     <span className="check-label">{check.label}</span>
                                     <span className="check-detail">
-                                        {check.detail}
+                                        {showCheckDetails && check.tech
+                                            ? check.tech
+                                            : check.detail}
                                         {check.link && (
                                             <>
                                                 {" — "}
@@ -1318,6 +1322,16 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                                 <p className="hint subtle">
                                     {preflight ? "Re-checking…" : "Running pre-flight checks…"}
                                 </p>
+                            )}
+                            {preflight && !preflightBusy && (
+                                <button
+                                    type="button"
+                                    className={`check-details-toggle${showCheckDetails ? " active" : ""}`}
+                                    onClick={() => setShowCheckDetails((v) => !v)}
+                                    aria-expanded={showCheckDetails}
+                                >
+                                    {showCheckDetails ? "Hide developer details" : "Developer details"}
+                                </button>
                             )}
                         </div>
                     )}
