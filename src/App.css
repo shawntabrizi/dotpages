@@ -1327,3 +1327,197 @@ body {
     transition: background 0.15s;
 }
 .builder-card-undo button:hover { background: rgba(52, 211, 153, 0.08); }
+
+/* ── Deploy result cards + logs modal (ported from playground builder.css) ── */
+.result {
+    margin-top: 4px;
+    padding: 16px;
+    background: var(--chrome-surface);
+    border: 1px solid var(--chrome-border);
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.result-partial { border-color: rgba(52, 211, 153, 0.3); }
+.result-error { border-color: rgba(255, 60, 60, 0.3); }
+.result-live-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--ok);
+}
+.result-fail-title {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    margin: 0;
+}
+.result-link-row { display: flex; align-items: center; gap: 8px; }
+.result-link {
+    flex: 1;
+    min-width: 0;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+    word-break: break-word;
+}
+.result-link:hover { text-decoration: underline; }
+.result-note {
+    color: var(--chrome-text2);
+    font-size: 12px;
+    line-height: 1.5;
+    padding-top: 8px;
+    border-top: 1px solid var(--chrome-border);
+    margin: 0;
+}
+.link-btn {
+    align-self: flex-start;
+    border: none;
+    background: transparent;
+    padding: 0;
+    color: var(--accent);
+    font: inherit;
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+/* Success card — replaces the form once the site is live. */
+.result-success {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 22px 18px;
+    text-align: center;
+    background: rgba(52, 211, 153, 0.08);
+    border: 1px solid rgba(52, 211, 153, 0.3);
+    border-radius: 10px;
+}
+.result-success-check {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--ok);
+    color: #0b0d12;
+}
+.result-success-title { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+.result-success-domain {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 14px;
+    color: var(--ok);
+    word-break: break-all;
+}
+.result-success-copy {
+    display: inline-flex;
+    align-items: center;
+    border: none;
+    background: transparent;
+    padding: 4px;
+    color: var(--chrome-text2);
+    cursor: pointer;
+    transition: color 0.15s;
+}
+.result-success-copy:hover { color: var(--chrome-text); }
+.result-success-copy.copied { color: var(--ok); }
+.result-success-hint { font-size: 11px; color: var(--chrome-text2); }
+.result-success-open {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px;
+    padding: 0 24px;
+    margin-top: 4px;
+    border-radius: 999px;
+    background: var(--ok);
+    color: #0b0d12;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.15s, box-shadow 0.15s;
+}
+.result-success-open:hover { background: #5de8b5; box-shadow: 0 0 20px rgba(52, 211, 153, 0.25); }
+.result-success-another {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 36px;
+    padding: 0 18px;
+    border-radius: 999px;
+    background: transparent;
+    border: 1px solid rgba(52, 211, 153, 0.3);
+    color: var(--chrome-text);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+.result-success-another:hover { border-color: rgba(52, 211, 153, 0.6); background: rgba(52, 211, 153, 0.08); }
+
+/* "Check your phone" hint on a signing step. */
+.progress-phone-hint { color: var(--accent); font-size: 12px; font-weight: 600; line-height: 1.4; }
+
+/* Logs modal — self-contained centered overlay. */
+.logs-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.6);
+}
+.logs-modal {
+    width: min(560px, 100%);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 18px;
+    background: var(--chrome-surface);
+    border: 1px solid var(--chrome-border);
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.logs-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 600;
+}
+.logs-modal-close {
+    border: none;
+    background: transparent;
+    color: var(--chrome-text2);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}
+.logs-modal-close:hover { color: var(--chrome-text); }
+.logs-modal-body {
+    flex: 1;
+    overflow: auto;
+    margin: 0;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.35);
+    border-radius: 8px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}

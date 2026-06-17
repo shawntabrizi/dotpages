@@ -38,7 +38,7 @@ import {
     tryExtensionAccount,
 } from "./account.ts";
 import { MAX_TX_BYTES } from "./lib/bulletin/limits.ts";
-import { BULLETIN_FAUCET_URL, DOT_HOST, PAS_FAUCET_URL } from "./lib/polkadot/constants.ts";
+import { BULLETIN_FAUCET_URL, DOT_HOST } from "./lib/polkadot/constants.ts";
 import { MAX_IMAGE_DIMENSION, resizeImageToFit } from "./image-resize.ts";
 import { TEMPLATES, type Template } from "./templates.ts";
 import {
@@ -199,6 +199,10 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
     const [deployStep, setDeployStep] = useState<number | null>(null);
     const [result, setResult] = useState<DeployResult | null>(null);
     const [deployError, setDeployError] = useState<string | null>(null);
+    // Raw technical detail shown in the LogsModal when the user taps "View logs".
+    const [logsText, setLogsText] = useState<string | null>(null);
+    // "Copied ✓" toggle for the success card's copy-link button.
+    const [copiedUrl, setCopiedUrl] = useState(false);
     const [openMenu, setOpenMenu] = useState<ActionMenu | null>(null);
     // Which structured block (link/button/image) has its bottom sheet open.
     const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
@@ -724,6 +728,16 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
             // address is still selectable text.
         }
     };
+    const copyLiveUrl = async () => {
+        if (!result) return;
+        try {
+            await navigator.clipboard.writeText(result.url);
+            setCopiedUrl(true);
+            setTimeout(() => setCopiedUrl(false), 1500);
+        } catch {
+            // Clipboard unavailable — the link is still selectable text.
+        }
+    };
     const showOwnedHint =
         !useDevAccount &&
         !hostAccount &&
@@ -1110,9 +1124,50 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                 />
             )}
 
-            {/* Deploy panel — visible only in deploy view. */}
+            {/* Deploy panel — visible only in deploy view. Once the site is
+                live, the success card REPLACES the form (name/checklist/button
+                are spent context); editing or switching views clears `result`. */}
             {view === "deploy" && (
                 <div className="deploy-panel" role="region" aria-label="Deploy">
+                    {result?.dotMapped ? (
+                        <div className="result-success" role="status">
+                            <span className="result-success-check" aria-hidden="true">
+                                <CheckIcon size={22} />
+                            </span>
+                            <p className="result-success-title">Your site is live</p>
+                            <p className="result-success-domain">
+                                {result.domain}.{DOT_HOST}
+                                <button
+                                    type="button"
+                                    className={`result-success-copy${copiedUrl ? " copied" : ""}`}
+                                    onClick={copyLiveUrl}
+                                    title="Copy the site link"
+                                    aria-label="Copy the site link"
+                                >
+                                    {copiedUrl ? <CheckIcon size={15} /> : <CopyIcon />}
+                                </button>
+                            </p>
+                            <p className="result-success-hint">
+                                Resolution can take a few seconds to propagate.
+                            </p>
+                            <a
+                                className="result-success-open"
+                                href={result.url}
+                                target="_blank"
+                                rel="noopener"
+                            >
+                                Open your site
+                            </a>
+                            <button
+                                type="button"
+                                className="result-success-another"
+                                onClick={onExit}
+                            >
+                                Build another site
+                            </button>
+                        </div>
+                    ) : (
+                    <>
                     <h2 className="deploy-title">Deploy your site</h2>
 
                     <div className="deploy-field">
@@ -1271,60 +1326,72 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                             steps={DEPLOY_STEPS}
                             step={deployStep}
                             status={status}
+                            phoneSteps={DEPLOY_PHONE_STEPS}
                         />
                     )}
 
-                    {result && (
-                        <div className="result result-stored">
-                            <Row label="bytes">{result.bytes.toLocaleString()} B</Row>
-                            <Row label="CID" mono>
-                                {result.cid}
-                            </Row>
-                            <Row label="gateway">
-                                <a href={result.gatewayUrl} target="_blank" rel="noopener">
-                                    {result.gatewayUrl}
-                                </a>
-                            </Row>
-                            {result.blockNumber !== null && (
-                                <Row label="block">
-                                    #{result.blockNumber.toLocaleString()}
-                                </Row>
-                            )}
-                            {result.dotMapped ? (
-                                <p className="result-note success">
-                                    Live on{" "}
-                                    <a href={result.url} target="_blank" rel="noopener">
-                                        {result.url}
-                                    </a>
-                                    . Resolution may take a few seconds to propagate.
+                    {/* Partial success: bytes are on Bulletin but the .dot
+                        mapping failed — the site is reachable via the gateway. */}
+                    {result && !result.dotMapped && (() => {
+                        const action = failureAction(
+                            result.dotError ?? "",
+                            "Check your balance or pick a different name, then deploy again.",
+                        );
+                        return (
+                            <div className="result result-partial">
+                                <p className="result-live-title">
+                                    <CheckIcon size={18} /> Your site is live
                                 </p>
-                            ) : (
-                                <div className="result-note">
-                                    <p>
-                                        Stored on Bulletin ✓. The{" "}
-                                        <code>.{DOT_HOST}</code> mapping step failed.
-                                        Bytes still retrievable via the gateway link.
-                                    </p>
-                                    {result.dotError && (
-                                        <pre className="error-block">
-                                            {result.dotError}
-                                        </pre>
-                                    )}
-                                    {result.dotError && (
-                                        <DotErrorHint
-                                            message={result.dotError}
-                                            address={activeAccount?.address ?? ""}
-                                        />
-                                    )}
+                                <div className="result-link-row">
+                                    <a
+                                        className="result-link"
+                                        href={result.gatewayUrl}
+                                        target="_blank"
+                                        rel="noopener"
+                                    >
+                                        {result.gatewayUrl}
+                                    </a>
                                 </div>
-                            )}
-                        </div>
-                    )}
-                    {deployError && (
-                        <pre className="error error-block">{deployError}</pre>
+                                <p className="result-note">
+                                    We weren't able to register your domain:{" "}
+                                    <code>{result.domain}.{DOT_HOST}</code>. {action}
+                                </p>
+                                {result.dotError && (
+                                    <button
+                                        type="button"
+                                        className="link-btn"
+                                        onClick={() => setLogsText(result.dotError)}
+                                    >
+                                        View logs
+                                    </button>
+                                )}
+                            </div>
+                        );
+                    })()}
+                    {deployError && (() => {
+                        const action = failureAction(
+                            deployError,
+                            "Check your balance, then deploy again.",
+                        );
+                        return (
+                            <div className="result result-error">
+                                <p className="result-fail-title">Deployment didn't finish</p>
+                                <p className="result-note">{action}</p>
+                                <button
+                                    type="button"
+                                    className="link-btn"
+                                    onClick={() => setLogsText(deployError)}
+                                >
+                                    View logs
+                                </button>
+                            </div>
+                        );
+                    })()}
+                    </>
                     )}
                 </div>
             )}
+            {logsText && <LogsModal text={logsText} onClose={() => setLogsText(null)} />}
 
             {/* Bottom centered nav — 3 tabs, always visible. */}
             <nav className="bottom-nav" aria-label="View">
@@ -1412,22 +1479,102 @@ export default function App() {
     return <Editor key={entry.id} entry={entry} onExit={() => setEntry(null)} />;
 }
 
+// Map a raw failure (deploy error / dotError) to one plain-English next action.
+// Timeout first: a stalled connection (deadline.ts) isn't an on-chain failure,
+// and retrying is safe because completed steps are reused.
+function failureAction(message: string, fallback: string): string {
+    const m = message.toLowerCase();
+    if (m.includes("timed out") || m.includes("took too long")) {
+        return "The connection stalled before this step finished — your completed steps are saved, so just deploy again.";
+    }
+    if (
+        m.includes("balance") ||
+        m.includes("transferfailed") ||
+        m.includes("fundsunavailable") ||
+        m.includes("inability to pay") ||
+        m.includes("storage deposit")
+    ) {
+        return "Add some test tokens to your account, then deploy again.";
+    }
+    if (m.includes("already registered") || m.includes("already taken")) {
+        return "That name is taken — pick another, then deploy again.";
+    }
+    if (m.includes("accountunmapped") || m.includes("mapping did not propagate")) {
+        return "Your account is still finishing setup — wait a moment, then deploy again.";
+    }
+    return fallback;
+}
+
+// Raw technical detail, tucked behind a "View logs" link so the failure cards
+// stay plain-English. Self-contained overlay (no shared modal dependency).
+function LogsModal({ text, onClose }: { text: string; onClose: () => void }) {
+    const [copied, setCopied] = useState(false);
+    const copy = async () => {
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+        } catch {
+            // clipboard unavailable — the text is still selectable
+        }
+    };
+    return (
+        <div className="logs-modal-backdrop" onClick={onClose}>
+            <div
+                className="logs-modal"
+                role="dialog"
+                aria-label="Deploy logs"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="logs-modal-head">
+                    <span>Deploy logs</span>
+                    <button type="button" className="logs-modal-close" onClick={onClose} aria-label="Close">
+                        ×
+                    </button>
+                </div>
+                <p className="hint subtle">Technical detail for debugging — share this with a developer.</p>
+                <pre className="logs-modal-body">{text}</pre>
+                <button type="button" className="pill pill-wide" onClick={copy}>
+                    {copied ? "Copied" : "Copy logs"}
+                </button>
+            </div>
+        </div>
+    );
+}
+
 // How long a single deploy step may run before the progress UI adds a "still
 // working" reassurance. The eased fill (progress.ts) is flat near its cap by
 // ~25s, so a step sitting past this should be told it isn't frozen.
 const SLOW_STEP_HINT_MS = 18_000;
 
+// Deploy steps whose transaction the user approves on their phone (host route)
+// or signs in their extension — StepProgress shows a "check your phone" hint
+// while one is active. The read-only dry-runs (account / name) are excluded.
+const DEPLOY_PHONE_STEPS: ReadonlySet<string> = new Set([
+    "prepare",
+    "bulletin",
+    "commit",
+    "register",
+    "link",
+]);
+
 function StepProgress({
     steps,
     step,
     status,
+    phoneSteps,
 }: {
     steps: readonly ProgressStep[];
     step: number;
     status: string;
+    /** Step ids whose tx the user approves on their phone / signs in their
+     *  extension — when the active step is one of these, a "check your phone"
+     *  hint is shown. */
+    phoneSteps?: ReadonlySet<string>;
 }) {
     const currentStep = steps[Math.min(step, steps.length - 1)];
     const stepNumber = Math.min(step + 1, steps.length);
+    const needsPhone = phoneSteps?.has(currentStep.id) ?? false;
 
     // Eased within-step fill for the active segment. The chain layer gives no
     // sub-progress for the slow broadcast/in-block wait, so we animate EXPECTED
@@ -1486,7 +1633,12 @@ function StepProgress({
                 ))}
             </div>
             <div className="status">{status}</div>
-            {slow && (
+            {needsPhone && (
+                <div className="progress-phone-hint" role="status">
+                    📱 Check your phone — approve this step to continue.
+                </div>
+            )}
+            {slow && !needsPhone && (
                 <div className="progress-slow-hint" role="status">
                     Still working — this can take a moment.
                 </div>
@@ -2075,100 +2227,7 @@ function VariantToggle({
 // Heuristic hint mapping common DotNS failures to actionable next steps.
 // The error strings come from pallet-revive dispatch errors, JSON-serialised
 // in submit-and-wait, so they're greppable.
-function DotErrorHint({ message, address }: { message: string; address: string }) {
-    const lower = message.toLowerCase();
 
-    if (
-        lower.includes("balance") ||
-        lower.includes("transferfailed") ||
-        lower.includes("fundsunavailable") ||
-        lower.includes("inability to pay") ||
-        lower.includes("storage deposit")
-    ) {
-        return (
-            <p className="hint">
-                <strong>Likely cause:</strong> the account doesn't have enough PAS
-                on Asset Hub Next — the domain price and storage deposits are paid
-                from the account itself (even when fees are host-sponsored). Hit
-                the{" "}
-                <a href={PAS_FAUCET_URL} target="_blank" rel="noopener">
-                    Asset Hub faucet
-                </a>
-                {address && (
-                    <>
-                        {" "}
-                        (paste the account address: <code>{address}</code>)
-                    </>
-                )}{" "}
-                and retry.
-            </p>
-        );
-    }
-
-    if (lower.includes("already registered") || lower.includes("already taken")) {
-        return (
-            <p className="hint">
-                <strong>Likely cause:</strong> someone else already registered this
-                name. Pick a different <code>.dot</code> name and retry.
-            </p>
-        );
-    }
-
-    if (lower.includes("accountunmapped") || lower.includes("mapping did not propagate")) {
-        return (
-            <p className="hint">
-                <strong>Likely cause:</strong> the account's SS58 → H160 mapping
-                hasn't landed yet. Wait ~30 s and retry — the map_account extrinsic
-                needs to finalise before contracts will accept calls.
-            </p>
-        );
-    }
-
-    if (lower.includes("commitment") && lower.includes("not found")) {
-        return (
-            <p className="hint">
-                <strong>Likely cause:</strong> the commitment expired between the
-                two-step register. Just retry — the commit-reveal flow restarts from
-                scratch.
-            </p>
-        );
-    }
-
-    if (lower.includes("priceofcommitmenttoolow") || lower.includes("invalidpayment")) {
-        return (
-            <p className="hint">
-                <strong>Likely cause:</strong> the price the contract demanded
-                exceeded our 10 % buffer (PoP rules may have changed mid-flight).
-                Retry — the price is re-quoted each attempt.
-            </p>
-        );
-    }
-
-    return (
-        <p className="hint">
-            Unknown failure. The dispatch-error JSON above is from pallet-revive —
-            pasting it into chat will help diagnose. Common culprits: the account
-            has no PAS for fees, name already taken, or the AH-Next RPC choked.
-        </p>
-    );
-}
-
-function Row({
-    label,
-    children,
-    mono,
-}: {
-    label: string;
-    children: React.ReactNode;
-    mono?: boolean;
-}) {
-    return (
-        <div className="row-line">
-            <span className="row-label">{label}</span>
-            <span className={`row-value${mono ? " mono" : ""}`}>{children}</span>
-        </div>
-    );
-}
 
 // Inline SVG icons. Lightweight, no dep.
 function UndoIcon() {
@@ -2209,6 +2268,21 @@ function BackIcon() {
     return (
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M15 18l-6-6 6-6" />
+        </svg>
+    );
+}
+function CheckIcon({ size = 18 }: { size?: number }) {
+    return (
+        <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M20 6L9 17l-5-5" />
+        </svg>
+    );
+}
+function CopyIcon({ size = 15 }: { size?: number }) {
+    return (
+        <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
         </svg>
     );
 }
