@@ -25,6 +25,7 @@
     "@ensdomains/content-hash": "^3.0.0",
     "@noble/hashes": "^1.4.0",
     "@novasamatech/host-api": "0.7.9-4",
+    "@novasamatech/host-api-wrapper": "0.7.9",
     "@novasamatech/product-sdk": "0.7.9-4",
     "@parity/product-sdk-address": "^0.1.1",
     "@parity/product-sdk-contracts": "^0.4.0",
@@ -43,9 +44,10 @@
     "react-dom": "^19.0.0",
     "viem": "^2.49.3"
   },
-  "_comment_overrides": "novasama product-sdk + host-api pinned in lockstep at 0.7.9-4 (the Rock-Paper-Scissors reference combo — its createAccountsProvider path is what current mobile/desktop hosts accept; @parity/product-sdk-signer's SignerManager is avoided because getLegacyAccounts is rejected by those hosts). @polkadot-api/json-rpc-provider is the standard upstream workaround.",
+  "_comment_overrides": "novasama product-sdk + host-api pinned in lockstep at 0.7.9-4 (the Rock-Paper-Scissors reference combo — its createAccountsProvider path is what current mobile/desktop hosts accept; @parity/product-sdk-signer's SignerManager is avoided because getLegacyAccounts is rejected by those hosts). host-api-wrapper rides the same 0.7.9 line (its host-api dep is forced to 0.7.9-4 below) — used only for hostApi.navigateTo in LinkPopup, which 0.7.9-4 already implements. @polkadot-api/json-rpc-provider is the standard upstream workaround.",
   "overrides": {
     "@novasamatech/host-api": "0.7.9-4",
+    "@novasamatech/host-api-wrapper": "0.7.9",
     "@novasamatech/product-sdk": "0.7.9-4",
     "@polkadot-api/json-rpc-provider": "^0.2.0"
   },
