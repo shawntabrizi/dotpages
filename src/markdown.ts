@@ -58,7 +58,7 @@ export function blocksToMarkdown(content: SiteContent): string {
                 break;
         }
     }
-    return parts.join("\n\n") + "\n";
+    return `${parts.join("\n\n")}\n`;
 }
 
 // <title> comes from the first ATX heading, mirroring renderHtmlParts'

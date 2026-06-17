@@ -59,7 +59,8 @@ const listeners = new Set<() => void>();
 // snapshot keeps a stable identity (useSyncExternalStore loops otherwise).
 let devAccount: ActiveAccount | null = null;
 function dev(): ActiveAccount {
-    return (devAccount ??= getDevAccount());
+    if (devAccount === null) devAccount = getDevAccount();
+    return devAccount;
 }
 
 // Cached public snapshot: getSnapshot MUST return the same reference until

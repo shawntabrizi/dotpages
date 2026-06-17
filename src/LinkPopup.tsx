@@ -8,7 +8,7 @@
 // this app's canonical isInHost() (src/lib/host/detect.ts — the one place that
 // logic lives); only hostApi.navigateTo comes from @novasamatech/host-api-wrapper.
 
-import { type AnchorHTMLAttributes } from "react";
+import type { AnchorHTMLAttributes } from "react";
 import { hostApi } from "@novasamatech/host-api-wrapper";
 import { isInHost } from "./lib/host/detect.ts";
 
