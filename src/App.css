@@ -1555,4 +1555,102 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
     .result-success-dot { animation: none; }
+/* Account / login widget (AccountBar) — homepage header + editor deploy panel. */
+.account-bar { position: relative; display: inline-block; }
+.account-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 220px;
+    padding: 7px 12px;
+    background: var(--chrome-surface);
+    border: 1px solid var(--chrome-border);
+    border-radius: 999px;
+    color: var(--chrome-text);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+.account-trigger:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.25); }
+.account-trigger:disabled { opacity: 0.7; cursor: default; }
+.account-trigger-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.source-dot.source-none { background: rgba(255, 255, 255, 0.3); }
+.account-caret { font-size: 10px; color: var(--chrome-text2); }
+
+.account-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 50;
+    min-width: 240px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px;
+    background: var(--chrome-surface);
+    border: 1px solid var(--chrome-border);
+    border-radius: 12px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.account-menu-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px 10px;
+    border-bottom: 1px solid var(--chrome-border);
+    margin-bottom: 4px;
+}
+.account-menu-id { min-width: 0; }
+.account-menu-name {
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.account-menu-meta { font-size: 11px; color: var(--chrome-text2); }
+.account-menu-action {
+    text-align: left;
+    padding: 8px 10px;
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    color: var(--chrome-text);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+.account-menu-action:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); }
+.account-menu-action:disabled { opacity: 0.6; cursor: default; }
+.account-menu-action.is-primary { color: var(--accent); font-weight: 600; }
+.account-menu-empty {
+    padding: 6px 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--chrome-text2);
+}
+.account-menu-empty a { color: var(--accent); text-decoration: none; }
+.account-menu-empty a:hover { text-decoration: underline; }
+.account-dev-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--chrome-border);
+    font-size: 12px;
+    color: var(--chrome-text2);
+    cursor: pointer;
+}
+.account-dev-toggle input { accent-color: var(--accent); cursor: pointer; }
+.account-menu-error {
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--danger);
+    word-break: break-word;
 }
