@@ -51,17 +51,19 @@ import {
     initialStateForEntry,
     saveDraft,
     newDraftId,
+    publishSite,
+    forkSite,
     loadDrafts,
     deleteDraft,
     restoreDraft,
     makeBlockId,
     type BuilderEntry,
+    type Deployment,
     type Draft,
     type DraftRecord,
     type EditorMode,
 } from "./draft.ts";
 import Landing from "./Landing.tsx";
-import { recordDeployedSite } from "./deployed.ts";
 import { easedStepProgress, PROGRESS_TAU_MS } from "./progress.ts";
 
 type View = "edit" | "preview" | "deploy";
@@ -202,7 +204,13 @@ function Editor({
     const [jsText, setJsText] = useState(initial.jsText);
     const [htmlPane, setHtmlPane] = useState<HtmlPane>("html");
     const [view, setView] = useState<View>("edit");
-    const [domain, setDomain] = useState("");
+    // Re-opening a published site prefills its existing domain, so a re-deploy
+    // updates the same .dot in place. The field stays editable — deliberately
+    // changing it forks a new site (see `deploy`). Drafts start blank
+    // (auto-derived on the deploy step).
+    const [domain, setDomain] = useState(() =>
+        entry.kind === "resume" && entry.deployment ? entry.deployment.domain : "",
+    );
     const [busy, setBusy] = useState(false);
     const [status, setStatus] = useState<string | null>(null);
     const [deployStep, setDeployStep] = useState<number | null>(null);
@@ -284,6 +292,11 @@ function Editor({
     // Reveals the developer-facing `tech` detail on each checklist row.
     const [showCheckDetails, setShowCheckDetails] = useState(false);
     const effectiveLabel = domain.trim().replace(/\.dot$/i, "") || autoLabel || "";
+    // Editing a published site whose domain field still matches its live domain
+    // → this deploy UPDATES it in place ("Update" copy). Clear the field to a
+    // new name and it becomes a fork instead.
+    const publishedDomain = entry.kind === "resume" ? entry.deployment?.domain : undefined;
+    const isRedeploy = !!publishedDomain && effectiveLabel === publishedDomain;
 
     // Intentionally narrow deps: derive once, on the first visit to the
     // deploy view, from whatever the content is at that moment. Seed from
@@ -351,14 +364,23 @@ function Editor({
     const draft: Draft = { mode, content, markdownText, htmlText, cssText, jsText };
     const draftRef = useRef(draft);
     draftRef.current = draft;
+    // Set true once a deploy has persisted this slot (publishSite/forkSite).
+    // After that, this Editor session is on the result screen and must NOT save
+    // back to entry.id — critically, a FORK moved the edited content to a new
+    // record and cleared this one's `working`; a stray flush would re-dirty it.
+    const deployedRef = useRef(false);
     useEffect(() => {
-        const t = setTimeout(() => saveDraft(entry.id, draft), 500);
+        const t = setTimeout(() => {
+            if (!deployedRef.current) saveDraft(entry.id, draft);
+        }, 500);
         return () => clearTimeout(t);
     }, [mode, content, markdownText, htmlText, cssText, jsText]); // eslint-disable-line react-hooks/exhaustive-deps
     // Flush synchronously when the page is leaving/backgrounding, so an edit
     // made within the debounce window survives a reload or mobile app-switch.
     useEffect(() => {
-        const flush = () => saveDraft(entry.id, draftRef.current);
+        const flush = () => {
+            if (!deployedRef.current) saveDraft(entry.id, draftRef.current);
+        };
         const onVisibility = () => {
             if (document.visibilityState === "hidden") flush();
         };
@@ -659,8 +681,35 @@ function Editor({
                 updateDeployStatus,
             );
             setResult(stored);
-            // Feed the landing page's "Your sites" list (local, this device).
-            if (stored.dotMapped) recordDeployedSite(stored.domain, stored.gatewayUrl);
+            // Persist to the local site store: the site moves from Drafts into
+            // "Your sites" with its source kept for future edits. Flush the
+            // current editor content FIRST so the stored canonical matches what
+            // just went live (the debounced autosave may not have fired). Only
+            // mark it published once DotNS actually mapped — otherwise it isn't
+            // really live, so leave it a draft / keep the prior deployment.
+            saveDraft(entry.id, draftRef.current);
+            if (stored.dotMapped) {
+                const deployment: Deployment = {
+                    domain: stored.domain,
+                    url: stored.url,
+                    deployedAt: Date.now(),
+                };
+                const forked = !!publishedDomain && stored.domain !== publishedDomain;
+                if (forked) {
+                    // Domain deliberately changed → fork: the edited content
+                    // becomes a NEW published site; the original stays untouched
+                    // and still live (forkSite discards its working copy).
+                    forkSite(entry.id, newDraftId(), deployment);
+                } else {
+                    // First deploy or re-deploy to the same domain → publish or
+                    // refresh in place (promotes working edits into canonical).
+                    publishSite(entry.id, deployment);
+                }
+                // Store now matches what's live — stop the pagehide flush from
+                // re-saving stale working edits (a fork must leave the original
+                // clean).
+                deployedRef.current = true;
+            }
         } catch (cause) {
             setDeployError(cause instanceof Error ? cause.message : String(cause));
         } finally {
@@ -1264,7 +1313,14 @@ function Editor({
                         onClick={onPrimaryClick}
                         disabled={deployBtn.disabled}
                     >
-                        {deployBtn.label}
+                        {deployBtn.mode === "deploying"
+                            ? isRedeploy
+                                ? "Updating…"
+                                : "Deploying…"
+                            : isRedeploy &&
+                                (deployBtn.mode === "deploy" || deployBtn.mode === "check")
+                              ? `Update ${publishedDomain}.dot`
+                              : deployBtn.label}
                     </button>
                     {/* A fresh check that didn't pass: re-check is the primary
                         fix, but the chain is the real authority, so offer a

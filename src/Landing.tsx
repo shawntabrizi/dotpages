@@ -6,8 +6,9 @@
 // a message).
 //
 // Ported from playground-app/src/builder/Landing.tsx, minus the playground-only
-// onboarding gate (BecomeBuilderCard / useOnboarding) and the host-nav PopupLink
-// (standalone links open in a new tab).
+// onboarding gate (BecomeBuilderCard / useOnboarding). Live-site links use
+// PopupLink so they open in the host browser inside Polkadot, and a new tab
+// in a standalone browser.
 
 import { useMemo, type ReactNode } from "react";
 import { PopupLink } from "./LinkPopup.tsx";
@@ -176,14 +177,9 @@ function StartCard({
                 // The stretched button can't nest a link; the live link sits
                 // beside it as a sibling footer affordance (z-index above the
                 // overlay so it opens the live site, not the editor).
-                <a
-                    className="builder-card-live"
-                    href={liveHref}
-                    target="_blank"
-                    rel="noopener"
-                >
+                <PopupLink className="builder-card-live" href={liveHref}>
                     View live ↗
-                </a>
+                </PopupLink>
             )}
             {onDelete && (
                 <button
@@ -341,15 +337,13 @@ export default function Landing({
                     {legacySites.length > 0 && (
                         <div className="builder-sites-cloud">
                             {legacySites.map((site) => (
-                                <a
+                                <PopupLink
                                     key={site.domain}
                                     className="builder-site-chip"
                                     href={site.url}
-                                    target="_blank"
-                                    rel="noopener"
                                 >
                                     {site.domain}.dot
-                                </a>
+                                </PopupLink>
                             ))}
                         </div>
                     )}
