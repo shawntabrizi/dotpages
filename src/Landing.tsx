@@ -10,6 +10,7 @@
 // (standalone links open in a new tab).
 
 import { useMemo, type ReactNode } from "react";
+import { PopupLink } from "./LinkPopup.tsx";
 import { TEMPLATES } from "./templates.ts";
 import { renderHtml } from "./template.ts";
 import { iframesAllowed } from "./iframes.ts";
@@ -323,15 +324,13 @@ export default function Landing({
                     <h2 className="builder-section-title">Your sites</h2>
                     <div className="builder-sites-cloud">
                         {deployedSites.map((site) => (
-                            <a
+                            <PopupLink
                                 key={site.domain}
                                 className="builder-site-chip"
                                 href={site.url}
-                                target="_blank"
-                                rel="noopener"
                             >
                                 {site.domain}.dot
-                            </a>
+                            </PopupLink>
                         ))}
                     </div>
                 </section>

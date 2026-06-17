@@ -28,6 +28,7 @@ import {
 import type { DeploySuccess } from "./deploy.ts";
 import { type PreflightReport, validateLabel } from "./preflight.ts";
 import { deployButtonState } from "./deployButton.ts";
+import { PopupLink } from "./LinkPopup.tsx";
 import { copyText } from "./clipboard.ts";
 import { checkBusyClearDelay } from "./checkVisibility.ts";
 import { deriveDomain } from "./derive-domain.ts";
@@ -1242,14 +1243,9 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                                 </p>
                             )}
                             {liveState !== "checking" && (
-                                <a
-                                    className="result-success-open"
-                                    href={result.url}
-                                    target="_blank"
-                                    rel="noopener"
-                                >
+                                <PopupLink className="result-success-open" href={result.url}>
                                     Open your site
-                                </a>
+                                </PopupLink>
                             )}
                             <button
                                 type="button"
@@ -1375,13 +1371,7 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                                         {check.link && (
                                             <>
                                                 {" — "}
-                                                <a
-                                                    href={check.link}
-                                                    target="_blank"
-                                                    rel="noopener"
-                                                >
-                                                    faucet
-                                                </a>
+                                                <PopupLink href={check.link}>faucet</PopupLink>
                                             </>
                                         )}
                                     </span>
@@ -1447,14 +1437,9 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                                     <CheckIcon size={18} /> Your site is live
                                 </p>
                                 <div className="result-link-row">
-                                    <a
-                                        className="result-link"
-                                        href={result.gatewayUrl}
-                                        target="_blank"
-                                        rel="noopener"
-                                    >
+                                    <PopupLink className="result-link" href={result.gatewayUrl}>
                                         {result.gatewayUrl}
-                                    </a>
+                                    </PopupLink>
                                 </div>
                                 <p className="result-note">
                                     We weren't able to register your domain:{" "}
