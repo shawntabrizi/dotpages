@@ -6,8 +6,9 @@
 // a message).
 //
 // Ported from playground-app/src/builder/Landing.tsx, minus the playground-only
-// onboarding gate (BecomeBuilderCard / useOnboarding) and the host-nav PopupLink
-// (standalone links open in a new tab).
+// onboarding gate (BecomeBuilderCard / useOnboarding). Live-site links use
+// PopupLink so they open in the host browser inside Polkadot, and a new tab
+// in a standalone browser.
 
 import { useMemo, type ReactNode } from "react";
 import { PopupLink } from "./LinkPopup.tsx";
@@ -19,6 +20,8 @@ import { loadDeployedSites } from "./deployed.ts";
 import {
     draftHtml,
     draftTitle,
+    editableDraft,
+    hasUnpublishedChanges,
     newDraftId,
     MAX_DRAFTS,
     MODE_NAMES,
@@ -85,8 +88,11 @@ function StartCard({
     snippet,
     name,
     desc,
+    pill,
+    liveHref,
     onClick,
     onDelete,
+    deleteLabel,
     disabled,
     modifier,
     testid,
@@ -103,9 +109,15 @@ function StartCard({
     snippet?: ReactNode;
     name: string;
     desc: string;
+    /** Small status chip (e.g. "Unpublished changes") shown on the card. */
+    pill?: string;
+    /** When set, renders a "View live" link to the deployed site. */
+    liveHref?: string;
     onClick: () => void;
-    /** Renders a small × control above the stretched button (draft cards). */
+    /** Renders a small × control above the stretched button (draft / site cards). */
     onDelete?: () => void;
+    /** aria-label/tooltip for the × — "Delete draft" vs "Remove from list". */
+    deleteLabel?: string;
     disabled?: boolean;
     modifier?: string;
     testid?: string;
@@ -150,6 +162,7 @@ function StartCard({
                     {snippet}
                 </div>
             )}
+            {pill && <span className="builder-card-pill">{pill}</span>}
             <button
                 type="button"
                 className="builder-card-button"
@@ -160,13 +173,21 @@ function StartCard({
                 <span className="builder-card-name">{name}</span>
                 <span className="builder-card-desc">{desc}</span>
             </button>
+            {liveHref && (
+                // The stretched button can't nest a link; the live link sits
+                // beside it as a sibling footer affordance (z-index above the
+                // overlay so it opens the live site, not the editor).
+                <PopupLink className="builder-card-live" href={liveHref}>
+                    View live ↗
+                </PopupLink>
+            )}
             {onDelete && (
                 <button
                     type="button"
                     className="builder-card-delete"
                     onClick={onDelete}
-                    aria-label={`Delete draft "${name}"`}
-                    title="Delete draft"
+                    aria-label={deleteLabel ?? `Delete draft "${name}"`}
+                    title={deleteLabel ?? "Delete draft"}
                 >
                     ×
                 </button>
@@ -175,26 +196,59 @@ function StartCard({
     );
 }
 
+// The just-deleted/untracked card's own slot becomes the undo affordance —
+// the user's eyes are already there. Shared by both sections.
+function UndoCard({ title, onUndo }: { title: string; onUndo: () => void }) {
+    return (
+        <div className="builder-card builder-card-undo" role="status">
+            <span className="builder-card-undo-title">{title}</span>
+            <button type="button" onClick={onUndo}>
+                Undo
+            </button>
+        </div>
+    );
+}
+
 export default function Landing({
-    drafts,
+    sites,
     onPick,
     onDelete,
     undoable,
     onUndo,
 }: {
-    drafts: DraftRecord[];
+    /** All records — drafts and published sites. Split here by `deployment`. */
+    sites: DraftRecord[];
     onPick: (entry: BuilderEntry) => void;
     onDelete: (record: DraftRecord, index: number) => void;
-    /** A just-deleted draft: its grid slot renders the in-place Undo card. */
+    /** A just-removed record: its grid slot renders the in-place Undo card.
+     *  `index` is the slot WITHIN its own section (drafts vs published). */
     undoable: { record: DraftRecord; index: number } | null;
     onUndo: () => void;
 }) {
-    // Read once per landing mount (the landing remounts on every return
-    // from the editor, so a fresh deploy shows up immediately).
-    const deployedSites = useMemo(loadDeployedSites, []);
+    // Split: published sites (live, editable) vs drafts (never deployed). Both
+    // keep newest-first from loadDrafts.
+    const published = useMemo(() => sites.filter((s) => s.deployment), [sites]);
+    const drafts = useMemo(() => sites.filter((s) => !s.deployment), [sites]);
 
-    // Draft thumbnails render through the same pipeline the editor's
-    // preview/deploy use — the card always shows exactly what's saved.
+    // Legacy "Your sites" entries from before sites carried source — show them
+    // as link-only chips, but only where a real editable record hasn't taken
+    // over the same domain.
+    const legacySites = useMemo(() => {
+        const liveDomains = new Set(published.map((s) => s.deployment!.domain));
+        return loadDeployedSites().filter((s) => !liveDomains.has(s.domain));
+    }, [published]);
+
+    // Thumbnails render through the same pipeline the editor's preview/deploy
+    // use — the card always shows what's saved (a published site's working
+    // edits if any, else its live content).
+    const publishedPreviews = useMemo(
+        () =>
+            published.map((r) => {
+                const d = editableDraft(r);
+                return { html: draftHtml(d), accent: d.content.accentColor };
+            }),
+        [published],
+    );
     const draftPreviews = useMemo(
         () =>
             drafts.map((r) => ({
@@ -216,7 +270,12 @@ export default function Landing({
             }),
         [],
     );
+    // The cap bounds work-in-progress DRAFTS, not published sites — deploying
+    // frees a slot, and you can keep as many live sites as you've shipped.
     const atCap = drafts.length >= MAX_DRAFTS;
+    // The undo slot belongs to whichever section the removed record came from.
+    const undoForDrafts = undoable && !undoable.record.deployment ? undoable : null;
+    const undoForPublished = undoable && undoable.record.deployment ? undoable : null;
     return (
         <div className="builder-landing">
             <header className="builder-landing-header">
@@ -229,9 +288,70 @@ export default function Landing({
                 </div>
                 <AccountBar />
             </header>
-            {(drafts.length > 0 || undoable) && (
+            {(published.length > 0 || legacySites.length > 0 || undoForPublished) && (
+                <section className="builder-section" aria-label="Your deployed sites">
+                    <h2 className="builder-section-title">Your sites</h2>
+                    <div className="builder-grid">
+                        {(() => {
+                            const cards = published.map((r, i) => {
+                                const d = editableDraft(r);
+                                const dirty = hasUnpublishedChanges(r);
+                                return (
+                                    <StartCard
+                                        key={r.id}
+                                        thumb={publishedPreviews[i]}
+                                        htmlKey={`${r.id}:${r.updatedAt}`}
+                                        name={draftTitle(d)}
+                                        desc={`${r.deployment!.domain}.dot`}
+                                        pill={dirty ? "Unpublished changes" : undefined}
+                                        liveHref={r.deployment!.url}
+                                        onClick={() =>
+                                            onPick({
+                                                kind: "resume",
+                                                id: r.id,
+                                                draft: d,
+                                                deployment: r.deployment,
+                                            })
+                                        }
+                                        onDelete={() => onDelete(r, i)}
+                                        deleteLabel="Remove from this list (your live site stays up)"
+                                        modifier="builder-card-resume"
+                                        testid="builder-site"
+                                    />
+                                );
+                            });
+                            if (undoForPublished) {
+                                cards.splice(
+                                    Math.min(undoForPublished.index, cards.length),
+                                    0,
+                                    <UndoCard
+                                        key="undo-slot"
+                                        title={`"${draftTitle(editableDraft(undoForPublished.record))}" removed`}
+                                        onUndo={onUndo}
+                                    />,
+                                );
+                            }
+                            return cards;
+                        })()}
+                    </div>
+                    {legacySites.length > 0 && (
+                        <div className="builder-sites-cloud">
+                            {legacySites.map((site) => (
+                                <PopupLink
+                                    key={site.domain}
+                                    className="builder-site-chip"
+                                    href={site.url}
+                                >
+                                    {site.domain}.dot
+                                </PopupLink>
+                            ))}
+                        </div>
+                    )}
+                </section>
+            )}
+            {(drafts.length > 0 || undoForDrafts) && (
                 <section className="builder-section">
-                    <h2 className="builder-section-title">Continue</h2>
+                    <h2 className="builder-section-title">Drafts</h2>
                     <div className="builder-grid">
                         {(() => {
                             const cards = drafts.map((r, i) => (
@@ -248,28 +368,20 @@ export default function Landing({
                                         onPick({ kind: "resume", id: r.id, draft: r.draft })
                                     }
                                     onDelete={() => onDelete(r, i)}
+                                    deleteLabel={`Delete draft "${draftTitle(r.draft)}"`}
                                     modifier="builder-card-resume"
                                     testid="builder-resume"
                                 />
                             ));
-                            if (undoable) {
-                                // The deleted card's own slot becomes the undo
-                                // affordance — the user's eyes are already there.
+                            if (undoForDrafts) {
                                 cards.splice(
-                                    Math.min(undoable.index, cards.length),
+                                    Math.min(undoForDrafts.index, cards.length),
                                     0,
-                                    <div
+                                    <UndoCard
                                         key="undo-slot"
-                                        className="builder-card builder-card-undo"
-                                        role="status"
-                                    >
-                                        <span className="builder-card-undo-title">
-                                            "{draftTitle(undoable.record.draft)}" deleted
-                                        </span>
-                                        <button type="button" onClick={onUndo}>
-                                            Undo
-                                        </button>
-                                    </div>,
+                                        title={`"${draftTitle(undoForDrafts.record.draft)}" deleted`}
+                                        onUndo={onUndo}
+                                    />,
                                 );
                             }
                             return cards;
@@ -323,22 +435,6 @@ export default function Landing({
                     />
                 </div>
             </section>
-            {deployedSites.length > 0 && (
-                <section className="builder-section" aria-label="Your deployed sites">
-                    <h2 className="builder-section-title">Your sites</h2>
-                    <div className="builder-sites-cloud">
-                        {deployedSites.map((site) => (
-                            <PopupLink
-                                key={site.domain}
-                                className="builder-site-chip"
-                                href={site.url}
-                            >
-                                {site.domain}.dot
-                            </PopupLink>
-                        ))}
-                    </div>
-                </section>
-            )}
         </div>
     );
 }

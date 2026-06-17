@@ -52,18 +52,45 @@ export interface Draft {
     jsText: string;
 }
 
+/** A site's live publication. Present on a record iff the site has been
+ *  deployed. `domain` is the bare label (no `.dot`); re-opening a published
+ *  site prefills this so a re-deploy updates the same domain in place. No
+ *  content snapshot is stored — the record's canonical `draft` IS the live
+ *  content (see `working` below), so divergence is a `draft`↔`working` compare. */
+export interface Deployment {
+    /** Bare label, no `.dot` suffix. */
+    domain: string;
+    /** Live site URL as returned by the deploy. */
+    url: string;
+    deployedAt: number;
+}
+
 export interface DraftRecord {
     id: string;
     /** Last save, ms epoch — orders the landing list, newest first. */
     updatedAt: number;
+    /**
+     * Unpublished draft: the editable content.
+     * PUBLISHED site (`deployment` set): the LIVE content — the exact thing
+     * last deployed. Edits never touch this; they land in `working`, so the
+     * canonical stays a faithful record of what's live until a re-deploy
+     * promotes `working` into it.
+     */
     draft: Draft;
+    /** Set iff the site is live. Absence = it's still a draft. */
+    deployment?: Deployment;
+    /** Pending edits to a published site, not yet re-deployed. Drives the
+     *  "Unpublished changes" pill. Unused for unpublished drafts. */
+    working?: Draft;
 }
 
 /** How the editor is entered from the landing page. `id` is the draft slot the
  *  session autosaves into — minted fresh for template/blank starts, so a new
- *  start never touches existing drafts. */
+ *  start never touches existing drafts. A `resume` of a published site carries
+ *  its `deployment` so the editor can prefill the domain and a re-deploy can
+ *  update in place. */
 export type BuilderEntry =
-    | { kind: "resume"; id: string; draft: Draft }
+    | { kind: "resume"; id: string; draft: Draft; deployment?: Deployment }
     | { kind: "template"; id: string; template: Template }
     | { kind: "blank"; id: string; mode: Exclude<EditorMode, "blocks"> };
 
@@ -146,7 +173,23 @@ function migrateLegacySingleDraft(): void {
     }
 }
 
-/** All drafts, newest first. Malformed records are dropped, not fatal. */
+// A deployment from storage: every field shape-gated (user-writable storage).
+// A malformed deployment is dropped, demoting the record back to a draft
+// rather than rendering a broken "Your sites" card.
+function validateDeployment(d: unknown): Deployment | null {
+    if (!d || typeof d !== "object") return null;
+    const dep = d as Deployment;
+    if (typeof dep.domain !== "string" || !dep.domain) return null;
+    if (typeof dep.url !== "string" || !dep.url) return null;
+    return {
+        domain: dep.domain,
+        url: dep.url,
+        deployedAt: typeof dep.deployedAt === "number" ? dep.deployedAt : 0,
+    };
+}
+
+/** All records (drafts + published sites), newest first. Malformed records are
+ *  dropped, not fatal. Callers split on `deployment` presence. */
 export function loadDrafts(): DraftRecord[] {
     try {
         migrateLegacySingleDraft();
@@ -162,7 +205,11 @@ export function loadDrafts(): DraftRecord[] {
                 const draft = validateDraft(rec.draft);
                 if (!draft) return [];
                 const updatedAt = typeof rec.updatedAt === "number" ? rec.updatedAt : 0;
-                return [{ id: rec.id, updatedAt, draft }];
+                const deployment = validateDeployment(rec.deployment) ?? undefined;
+                // `working` only means something on a published record; a stray
+                // working copy on a draft is harmless but dropped for tidiness.
+                const working = deployment ? validateDraft(rec.working) ?? undefined : undefined;
+                return [{ id: rec.id, updatedAt, draft, deployment, working }];
             })
             .sort((a, b) => b.updatedAt - a.updatedAt);
     } catch {
@@ -171,15 +218,58 @@ export function loadDrafts(): DraftRecord[] {
     }
 }
 
-/** Upsert one draft slot. Loading first re-validates the whole list, so a
- *  corrupt sibling record gets dropped here rather than resaved forever. */
+/** Autosave one slot. Routes by publication state: a PUBLISHED record's edits
+ *  land in `working` (the live `draft` stays put until a re-deploy promotes
+ *  it); an unpublished record edits `draft` directly. Loading first re-validates
+ *  the whole list, so a corrupt sibling gets dropped rather than resaved. */
 export function saveDraft(id: string, draft: Draft): void {
     try {
-        const records = loadDrafts().filter((r) => r.id !== id);
-        records.unshift({ id, updatedAt: Date.now(), draft });
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+        const records = loadDrafts();
+        const existing = records.find((r) => r.id === id);
+        const rest = records.filter((r) => r.id !== id);
+        const next: DraftRecord = existing?.deployment
+            ? { ...existing, updatedAt: Date.now(), working: draft }
+            : { id, updatedAt: Date.now(), draft };
+        rest.unshift(next);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
     } catch {
         // Storage full/unavailable — autosave is best-effort.
+    }
+}
+
+/** Mark a site live (first deploy) or refresh its publication (re-deploy to
+ *  the SAME domain). Promotes any `working` edits into the canonical `draft`
+ *  and clears `working`, so the record's `draft` again equals what's live. */
+export function publishSite(id: string, deployment: Deployment): void {
+    try {
+        const records = loadDrafts();
+        const existing = records.find((r) => r.id === id);
+        const canonical = existing?.working ?? existing?.draft;
+        if (!canonical) return; // nothing to publish (slot vanished)
+        const rest = records.filter((r) => r.id !== id);
+        rest.unshift({ id, updatedAt: Date.now(), draft: canonical, deployment });
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
+    } catch {
+        // best-effort
+    }
+}
+
+/** Fork a published site to a NEW domain: the edited (`working`) content becomes
+ *  a brand-new published record `newId`, and the SOURCE record's `working` is
+ *  discarded so the original returns to its untouched, still-live state. */
+export function forkSite(srcId: string, newId: string, deployment: Deployment): void {
+    try {
+        const records = loadDrafts();
+        const src = records.find((r) => r.id === srcId);
+        const forkContent = src?.working ?? src?.draft;
+        if (!forkContent) return;
+        const cleaned = records
+            .filter((r) => r.id !== newId)
+            .map((r) => (r.id === srcId ? { ...r, working: undefined } : r));
+        cleaned.unshift({ id: newId, updatedAt: Date.now(), draft: forkContent, deployment });
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+    } catch {
+        // best-effort
     }
 }
 
@@ -245,6 +335,43 @@ export function draftHtml(d: Draft): string {
                 js: d.jsText,
             });
     }
+}
+
+// Fast, dependency-free 53-bit string hash (cyrb53). Used only to compare a
+// published site's working edits against what's live — never for security.
+function cyrb53(s: string): string {
+    let h1 = 0xdeadbeef;
+    let h2 = 0x41c6ce57;
+    for (let i = 0; i < s.length; i++) {
+        const ch = s.charCodeAt(i);
+        h1 = Math.imul(h1 ^ ch, 2654435761);
+        h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+/** Stable fingerprint of the document a draft would DEPLOY. Hashing the
+ *  rendered `draftHtml` (not the raw model) means two drafts that produce
+ *  byte-identical sites compare equal, and it's deterministic — `draftHtml`
+ *  pulls in no randomness (unlike `deriveDomain`). */
+export function hashDraft(d: Draft): string {
+    return cyrb53(draftHtml(d));
+}
+
+/** The content to show/edit for a record: a published site's pending `working`
+ *  edits if any, else its canonical `draft`. */
+export function editableDraft(r: DraftRecord): Draft {
+    return r.working ?? r.draft;
+}
+
+/** True when a published site has local edits that aren't live yet — drives
+ *  the landing's "Unpublished changes" pill. Only meaningful for published
+ *  records; a draft is never "diverged". */
+export function hasUnpublishedChanges(r: DraftRecord): boolean {
+    if (!r.deployment || !r.working) return false;
+    return hashDraft(r.working) !== hashDraft(r.draft);
 }
 
 // Blank HTML start: a small working document across all three panes. The CSS
