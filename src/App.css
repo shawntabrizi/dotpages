@@ -1664,4 +1664,35 @@ body {
     font-size: 11px;
     color: var(--danger);
     word-break: break-word;
+/* "Unpublished changes" badge on a published-site card — top-left, opposite
+   the × . Non-interactive: the card click still opens the editor. */
+.builder-card-pill {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 1;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: rgba(230, 0, 122, 0.15);
+    border: 1px solid var(--accent, #e6007a);
+    color: var(--chrome-text);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.5;
+    pointer-events: none;
+}
+
+/* "View live" link on a published-site card — sits ABOVE the stretched click
+   overlay (z-index) so it opens the live site instead of the editor. */
+.builder-card-live {
+    position: relative;
+    z-index: 1;
+    align-self: flex-start;
+    font-size: 13px;
+    color: var(--chrome-text2);
+    text-decoration: none;
+}
+.builder-card-live:hover {
+    color: var(--chrome-text);
+    text-decoration: underline;
 }

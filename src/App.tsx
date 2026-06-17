@@ -1426,7 +1426,7 @@ export default function App() {
     if (!entry)
         return (
             <Landing
-                drafts={drafts}
+                sites={drafts}
                 onPick={setEntry}
                 onDelete={handleDelete}
                 undoable={undoable}
