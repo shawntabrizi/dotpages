@@ -30,7 +30,11 @@ export interface PreflightCheck {
     id: "size" | "bulletin" | "name" | "funds" | "mapped";
     label: string;
     state: CheckState;
+    /** Plain-English status, always shown. */
     detail: string | null;
+    /** Developer-facing raw values (bytes, balances, tiers) — shown only when
+     *  the user toggles "Developer details". */
+    tech: string | null;
     /** Actionable link (faucet etc.) rendered next to the detail. */
     link: string | null;
 }
@@ -78,7 +82,8 @@ const verifyLater = (id: PreflightCheck["id"], label: string): PreflightCheck =>
     id,
     label,
     state: "warn",
-    detail: "Couldn't verify (network error) — deploy will check this for real",
+    detail: "Couldn't check — the deploy will verify this.",
+    tech: "Check timed out or the RPC errored (read-only — deploy re-verifies).",
     link: null,
 });
 
@@ -93,14 +98,13 @@ export async function runPreflight(params: {
     const cid = computeCID(bytes).toString();
 
     // ── size: local, exact ───────────────────────────────────────────────
+    const sizeOk = bytes.length <= MAX_TX_BYTES;
     const sizeCheck: PreflightCheck = {
         id: "size",
         label: "Site size",
-        state: bytes.length <= MAX_TX_BYTES ? "ok" : "fail",
-        detail:
-            bytes.length <= MAX_TX_BYTES
-                ? `${bytes.length.toLocaleString()} B (max ${(MAX_TX_BYTES / 1024 / 1024).toFixed(0)} MiB)`
-                : `${bytes.length.toLocaleString()} B exceeds the ${(MAX_TX_BYTES / 1024 / 1024).toFixed(0)} MiB per-transaction cap`,
+        state: sizeOk ? "ok" : "fail",
+        detail: sizeOk ? "Ready" : "Too large to deploy — remove large files or images",
+        tech: `${bytes.length.toLocaleString()} B / ${(MAX_TX_BYTES / 1024 / 1024).toFixed(0)} MiB max`,
         link: null,
     };
 
@@ -114,7 +118,8 @@ export async function runPreflight(params: {
                 id: "bulletin",
                 label: "Bulletin storage",
                 state: "ok",
-                detail: "Submitted by the host — no account authorization needed",
+                detail: "Ready",
+                tech: "Host account — submitted by the host, no authorization needed",
                 link: null,
             };
         }
@@ -124,8 +129,9 @@ export async function runPreflight(params: {
                 id: "bulletin",
                 label: "Bulletin storage",
                 state: "fail",
-                detail: auth.expired
-                    ? `Authorization expired at block #${auth.expiresAt?.toLocaleString()} — re-up at the faucet`
+                detail: "You need storage access to deploy.",
+                tech: auth.expired
+                    ? `Authorization expired at block #${auth.expiresAt?.toLocaleString()}`
                     : `${account.displayName} has no Bulletin storage authorization`,
                 link: BULLETIN_FAUCET_URL,
             };
@@ -136,7 +142,8 @@ export async function runPreflight(params: {
                 id: "bulletin",
                 label: "Bulletin storage",
                 state: "warn",
-                detail: `${(remaining > 0n ? remaining : 0n).toLocaleString()} B of ${auth.bytesAllowance.toLocaleString()} B allowance left — store still works, but at degraded priority`,
+                detail: "Storage may be low — the deploy still works, at lower priority.",
+                tech: `${(remaining > 0n ? remaining : 0n).toLocaleString()} B of ${auth.bytesAllowance.toLocaleString()} B allowance left for a ${bytes.length.toLocaleString()} B site`,
                 link: BULLETIN_FAUCET_URL,
             };
         }
@@ -144,7 +151,8 @@ export async function runPreflight(params: {
             id: "bulletin",
             label: "Bulletin storage",
             state: "ok",
-            detail: `${remaining.toLocaleString()} B of ${auth.bytesAllowance.toLocaleString()} B allowance remaining`,
+            detail: "Ready",
+            tech: `${remaining.toLocaleString()} B of ${auth.bytesAllowance.toLocaleString()} B allowance remaining`,
             link: null,
         };
     };
@@ -154,7 +162,7 @@ export async function runPreflight(params: {
     const nameCheck = async (): Promise<PreflightCheck> => {
         const invalid = validateLabel(label);
         if (invalid) {
-            return { id: "name", label: ".dot name", state: "fail", detail: invalid, link: null };
+            return { id: "name", label: ".dot name", state: "fail", detail: invalid, tech: `validateLabel: ${invalid}`, link: null };
         }
         const ownerEvm = await getEvmAddress(account.address);
         const available = await checkDomainAvailability(label, account.address);
@@ -165,7 +173,8 @@ export async function runPreflight(params: {
                     id: "name",
                     label: ".dot name",
                     state: "ok",
-                    detail: `${label}.dot is yours — deploying updates its content (no registration fee)`,
+                    detail: "Yours — deploying updates it",
+                    tech: `${label}.dot owned by this account — content update, no registration fee`,
                     link: null,
                 };
             }
@@ -173,7 +182,8 @@ export async function runPreflight(params: {
                 id: "name",
                 label: ".dot name",
                 state: "fail",
-                detail: `${label}.dot is already registered — pick another name`,
+                detail: "Taken — pick another name",
+                tech: `${label}.dot already registered to ${owner ?? "another account"}`,
                 link: null,
             };
         }
@@ -192,7 +202,8 @@ export async function runPreflight(params: {
                 id: "name",
                 label: ".dot name",
                 state: "warn",
-                detail: `Available, but "${quote.message ?? "restricted"}" — this account's verification tier (${quote.userStatus}) is below the name's requirement (${quote.status})${priceText}`,
+                detail: `Available, but restricted${quote.message ? ` ("${quote.message}")` : ""} — try a longer name ending in two digits.`,
+                tech: `requires tier ${quote.status}, your PoP tier ${quote.userStatus}${priceText}`,
                 link: null,
             };
         }
@@ -200,7 +211,8 @@ export async function runPreflight(params: {
             id: "name",
             label: ".dot name",
             state: "ok",
-            detail: `${label}.dot is available${priceText}`,
+            detail: "Available",
+            tech: `available${priceText}${quote.status !== null ? `, name tier ${quote.status}` : ""}`,
             link: null,
         };
     };
@@ -222,10 +234,8 @@ export async function runPreflight(params: {
                 id: "funds",
                 label: "Funds",
                 state: "fail",
-                detail:
-                    account.source === "host"
-                        ? `The product account has no PAS — fees are host-sponsored, but the domain price and deposits are paid from it. Send PAS to the account address above`
-                        : `${account.displayName} has no PAS on Asset Hub`,
+                detail: "Test tokens are needed to register your .dot name.",
+                tech: `0 PAS free on Asset Hub${account.source === "host" ? " (fees host-sponsored, but the domain price + deposits aren't)" : ""}`,
                 link: PAS_FAUCET_URL,
             };
         }
@@ -233,9 +243,8 @@ export async function runPreflight(params: {
             id: "funds",
             label: "Funds",
             state: "ok",
-            detail:
-                `${formatPas(freeNative)} free on Asset Hub` +
-                (account.source === "host" ? " (fees host-sponsored)" : ""),
+            detail: "Ready",
+            tech: `${formatPas(freeNative)} free on Asset Hub${account.source === "host" ? " (fees host-sponsored)" : ""}`,
             link: null,
         };
     };
@@ -244,12 +253,13 @@ export async function runPreflight(params: {
     const mappedCheck = async (): Promise<PreflightCheck> => {
         const mapped = await isAccountMapped(account.address);
         return mapped
-            ? { id: "mapped", label: "Account setup", state: "ok", detail: "Mapped on Asset Hub", link: null }
+            ? { id: "mapped", label: "Account setup", state: "ok", detail: "Ready", tech: "Mapped on Asset Hub", link: null }
             : {
                   id: "mapped",
                   label: "Account setup",
                   state: "warn",
-                  detail: "One-time map_account transaction will run during deploy",
+                  detail: "A one-time setup step runs during deploy.",
+                  tech: "Not mapped — map_account runs as the first deploy tx",
                   link: null,
               };
     };
@@ -271,7 +281,8 @@ export async function runPreflight(params: {
         freeNative < priceNative + FEE_MARGIN
     ) {
         funds.state = "warn";
-        funds.detail = `${formatPas(freeNative)} free may not cover price ${formatPas(priceNative)} + fees`;
+        funds.detail = "You're close — top up to cover the registration fees.";
+        funds.tech = `${formatPas(freeNative)} free vs price ${formatPas(priceNative)} + ~${formatPas(FEE_MARGIN)} fees/deposits`;
         funds.link = PAS_FAUCET_URL;
     }
 

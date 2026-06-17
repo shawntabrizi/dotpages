@@ -26,7 +26,10 @@ import {
 // their call sites via dynamic import(); only their TYPES are imported
 // statically (erased at compile time).
 import type { DeploySuccess } from "./deploy.ts";
-import type { PreflightReport } from "./preflight.ts";
+import { type PreflightReport, validateLabel } from "./preflight.ts";
+import { deployButtonState } from "./deployButton.ts";
+import { copyText } from "./clipboard.ts";
+import { checkBusyClearDelay } from "./checkVisibility.ts";
 import { deriveDomain } from "./derive-domain.ts";
 import { signInToHost, useHostState } from "./signer.ts";
 import { ensureHostPermission } from "./lib/host/permissions.ts";
@@ -38,7 +41,7 @@ import {
     tryExtensionAccount,
 } from "./account.ts";
 import { MAX_TX_BYTES } from "./lib/bulletin/limits.ts";
-import { BULLETIN_FAUCET_URL, DOT_HOST, PAS_FAUCET_URL } from "./lib/polkadot/constants.ts";
+import { BULLETIN_FAUCET_URL, DOT_HOST } from "./lib/polkadot/constants.ts";
 import { MAX_IMAGE_DIMENSION, resizeImageToFit } from "./image-resize.ts";
 import { TEMPLATES, type Template } from "./templates.ts";
 import {
@@ -199,6 +202,17 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
     const [deployStep, setDeployStep] = useState<number | null>(null);
     const [result, setResult] = useState<DeployResult | null>(null);
     const [deployError, setDeployError] = useState<string | null>(null);
+    // Raw technical detail shown in the LogsModal when the user taps "View logs".
+    const [logsText, setLogsText] = useState<string | null>(null);
+    // "Copied ✓" toggle for the success card's copy-link button.
+    const [copiedUrl, setCopiedUrl] = useState(false);
+    // Post-deploy resolution: resolvers/gateways read the FINALIZED contenthash,
+    // which lags the best-block deploy by a finality window — so "Open your
+    // site" waits until the finalized contenthash equals the CID we wrote.
+    // Fail-open: a read error or 3 minutes flips it to "assumed" (open anyway).
+    const [liveState, setLiveState] = useState<"checking" | "confirmed" | "assumed">(
+        "checking",
+    );
     const [openMenu, setOpenMenu] = useState<ActionMenu | null>(null);
     // Which structured block (link/button/image) has its bottom sheet open.
     const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
@@ -309,10 +323,16 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
     const [autoLabel, setAutoLabel] = useState<string | null>(null);
     const [preflight, setPreflight] = useState<PreflightReport | null>(null);
     const [preflightBusy, setPreflightBusy] = useState(false);
-    // Failed checks don't hard-block Deploy — the first click arms an
-    // "are you sure" confirmation, the second deploys anyway. The chain is
-    // the real authority; the checklist is advice.
-    const [confirmArmed, setConfirmArmed] = useState(false);
+    // The label the last completed check ran for — drives `checkFresh`. A name
+    // edit invalidates it, so the button reverts from "Deploy" to re-checking.
+    const [checkedLabel, setCheckedLabel] = useState<string | null>(null);
+    // The last check attempt errored (flaky RPC) — surfaces "Check again".
+    const [preflightFailed, setPreflightFailed] = useState(false);
+    // Bumped by "Check again" to force a re-run of the (otherwise input-driven)
+    // pre-flight effect.
+    const [recheckNonce, setRecheckNonce] = useState(0);
+    // Reveals the developer-facing `tech` detail on each checklist row.
+    const [showCheckDetails, setShowCheckDetails] = useState(false);
     const [copiedAddress, setCopiedAddress] = useState(false);
     const effectiveLabel = domain.trim().replace(/\.dot$/i, "") || autoLabel || "";
 
@@ -336,9 +356,10 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
         }
         let cancelled = false;
         setPreflightBusy(true);
+        setPreflightFailed(false);
         setResult(null); // inputs changed — a previous deploy result is stale
-        setConfirmArmed(false); // …and so is an armed "deploy anyway"
         const t = setTimeout(() => {
+            const startedAt = Date.now();
             import("./preflight.ts")
                 .then(({ runPreflight }) =>
                     runPreflight({
@@ -348,13 +369,24 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                     }),
                 )
                 .then((report) => {
-                    if (!cancelled) setPreflight(report);
+                    if (cancelled) return;
+                    setPreflight(report);
+                    setCheckedLabel(effectiveLabel);
                 })
                 .catch(() => {
-                    if (!cancelled) setPreflight(null);
+                    if (cancelled) return;
+                    setPreflight(null);
+                    setPreflightFailed(true);
+                    setCheckedLabel(effectiveLabel);
                 })
                 .finally(() => {
-                    if (!cancelled) setPreflightBusy(false);
+                    // Keep "Checking…" visible a minimum perceptible window so a
+                    // check that resolves instantly (cached / wedged-socket
+                    // reject) still paints feedback.
+                    const delay = checkBusyClearDelay(Date.now() - startedAt);
+                    setTimeout(() => {
+                        if (!cancelled) setPreflightBusy(false);
+                    }, delay);
                 });
         }, 400);
         return () => {
@@ -363,7 +395,8 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
         };
         // currentHtml is stable for a given content/mode; content edits can
         // only happen in the edit view, so the `view` dep re-checks on return.
-    }, [view, effectiveLabel, activeAccount]); // eslint-disable-line react-hooks/exhaustive-deps
+        // recheckNonce lets "Check again" force a re-run.
+    }, [view, effectiveLabel, activeAccount, recheckNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Debounced draft autosave — every edit lands in localStorage shortly after.
     const draft: Draft = { mode, content, markdownText, htmlText, cssText, jsText };
@@ -701,29 +734,89 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
         isEditing && mode === "blocks"
             ? content.blocks.find((b) => b.id === editingBlockId) ?? null
             : null;
-    // Only hard requirements disable Deploy (a signer and a name). Failed
-    // checks instead arm a confirm step — see onDeployClick.
-    const canDeploy = !busy && activeAccount !== null && effectiveLabel !== "";
-    const checksClean = preflight !== null && preflight.ok && !preflightBusy;
-    const onDeployClick = () => {
-        if (!checksClean && !confirmArmed) {
-            setConfirmArmed(true);
-            return;
-        }
-        setConfirmArmed(false);
-        void deploy();
+    // Primary deploy-button state (pure derivation). The checklist auto-runs,
+    // so a fresh result is usually already in hand: a clean pass shows "Deploy";
+    // a non-pass shows "Check again" + a secondary "Try to deploy anyway".
+    const checkFresh = checkedLabel !== null && checkedLabel === effectiveLabel;
+    const localOk = effectiveLabel !== "" && validateLabel(effectiveLabel) === null;
+    const deployBtn = deployButtonState({
+        busy,
+        preflightBusy,
+        hasAccount: activeAccount !== null,
+        hasName: effectiveLabel !== "",
+        localOk,
+        checkFresh,
+        preflightOk: preflight?.ok ?? null,
+        preflightFailed,
+    });
+    const runCheck = () => setRecheckNonce((n) => n + 1);
+    const onPrimaryClick = () => {
+        // "deploy" = a fresh pass → deploy. "check"/"checkAgain" → (re-)run the
+        // bounded check. The chain re-verifies, so "Try to deploy anyway" (the
+        // secondary, rendered on checkAgain) is the escape hatch.
+        if (deployBtn.mode === "deploy") void deploy();
+        else runCheck();
     };
     const copyAddress = async () => {
         if (!activeAccount) return;
-        try {
-            await navigator.clipboard.writeText(activeAccount.address);
+        if (await copyText(activeAccount.address)) {
             setCopiedAddress(true);
             setTimeout(() => setCopiedAddress(false), 1500);
-        } catch {
-            // Clipboard unavailable (permissions/insecure context) — the
-            // address is still selectable text.
         }
     };
+    const copyLiveUrl = async () => {
+        if (!result) return;
+        if (await copyText(result.url)) {
+            setCopiedUrl(true);
+            setTimeout(() => setCopiedUrl(false), 1500);
+        }
+    };
+    // Post-deploy "is it live yet" poll. Resolvers read the FINALIZED
+    // contenthash; the deploy confirms at best-block, so for one finality lag
+    // "Open your site" would point at a not-yet-resolvable page. Poll the
+    // finalized contenthash until it equals the CID we deployed; fail open
+    // after 3 minutes / on a read error. content-hash is dynamically imported
+    // so its chain deps stay out of the main chunk (matching the deploy path).
+    useEffect(() => {
+        if (!result?.dotMapped) return;
+        const addr = activeAccount?.address;
+        if (!addr) {
+            setLiveState("assumed");
+            return;
+        }
+        let cancelled = false;
+        setLiveState("checking");
+        const deadline = Date.now() + 180_000;
+        let interval: ReturnType<typeof setInterval> | null = null;
+        let want: string | null = null;
+        const stop = (state: "confirmed" | "assumed") => {
+            if (interval) clearInterval(interval);
+            interval = null;
+            if (!cancelled) setLiveState(state);
+        };
+        const tick = async () => {
+            if (cancelled) return;
+            try {
+                const { encodeIpfsContenthash, readContentHashFinalized } = await import(
+                    "./lib/dotns/content-hash.ts"
+                );
+                if (cancelled) return;
+                if (!want) want = encodeIpfsContenthash(result.cid).toLowerCase();
+                const onChain = await readContentHashFinalized(result.domain, addr);
+                if (cancelled) return;
+                if (onChain?.toLowerCase() === want) stop("confirmed");
+                else if (Date.now() > deadline) stop("assumed");
+            } catch {
+                stop("assumed");
+            }
+        };
+        void tick();
+        interval = setInterval(tick, 6000);
+        return () => {
+            cancelled = true;
+            if (interval) clearInterval(interval);
+        };
+    }, [result, activeAccount?.address]);
     const showOwnedHint =
         !useDevAccount &&
         !hostAccount &&
@@ -1110,9 +1203,64 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                 />
             )}
 
-            {/* Deploy panel — visible only in deploy view. */}
+            {/* Deploy panel — visible only in deploy view. Once the site is
+                live, the success card REPLACES the form (name/checklist/button
+                are spent context); editing or switching views clears `result`. */}
             {view === "deploy" && (
                 <div className="deploy-panel" role="region" aria-label="Deploy">
+                    {result?.dotMapped ? (
+                        <div className="result-success" role="status">
+                            <span className="result-success-check" aria-hidden="true">
+                                <CheckIcon size={22} />
+                            </span>
+                            <p className="result-success-title">
+                                {liveState === "checking"
+                                    ? "Your site is deployed"
+                                    : "Your site is live"}
+                            </p>
+                            <p className="result-success-domain">
+                                {result.domain}.{DOT_HOST}
+                                <button
+                                    type="button"
+                                    className={`result-success-copy${copiedUrl ? " copied" : ""}`}
+                                    onClick={copyLiveUrl}
+                                    title="Copy the site link"
+                                    aria-label="Copy the site link"
+                                >
+                                    {copiedUrl ? <CheckIcon size={15} /> : <CopyIcon />}
+                                </button>
+                            </p>
+                            {liveState === "checking" && (
+                                <p className="result-success-status" role="status" aria-live="polite">
+                                    <span className="result-success-dot" aria-hidden="true" />
+                                    going live — usually under a minute
+                                </p>
+                            )}
+                            {liveState === "assumed" && (
+                                <p className="result-success-hint">
+                                    If the link doesn't load yet, give it another minute and try again.
+                                </p>
+                            )}
+                            {liveState !== "checking" && (
+                                <a
+                                    className="result-success-open"
+                                    href={result.url}
+                                    target="_blank"
+                                    rel="noopener"
+                                >
+                                    Open your site
+                                </a>
+                            )}
+                            <button
+                                type="button"
+                                className="result-success-another"
+                                onClick={onExit}
+                            >
+                                Build another site
+                            </button>
+                        </div>
+                    ) : (
+                    <>
                     <h2 className="deploy-title">Deploy your site</h2>
 
                     <div className="deploy-field">
@@ -1221,7 +1369,9 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                                     </span>
                                     <span className="check-label">{check.label}</span>
                                     <span className="check-detail">
-                                        {check.detail}
+                                        {showCheckDetails && check.tech
+                                            ? check.tech
+                                            : check.detail}
                                         {check.link && (
                                             <>
                                                 {" — "}
@@ -1242,28 +1392,37 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                                     {preflight ? "Re-checking…" : "Running pre-flight checks…"}
                                 </p>
                             )}
+                            {preflight && !preflightBusy && (
+                                <button
+                                    type="button"
+                                    className={`check-details-toggle${showCheckDetails ? " active" : ""}`}
+                                    onClick={() => setShowCheckDetails((v) => !v)}
+                                    aria-expanded={showCheckDetails}
+                                >
+                                    {showCheckDetails ? "Hide developer details" : "Developer details"}
+                                </button>
+                            )}
                         </div>
                     )}
 
                     <button
-                        className={`pill pill-primary pill-wide${confirmArmed ? " pill-confirm" : ""}`}
-                        onClick={onDeployClick}
-                        disabled={!canDeploy}
+                        className="pill pill-primary pill-wide"
+                        onClick={onPrimaryClick}
+                        disabled={deployBtn.disabled}
                     >
-                        {busy
-                            ? "Deploying…"
-                            : confirmArmed
-                              ? "Deploy anyway?"
-                              : preflightBusy
-                                ? "Checking…"
-                                : "Deploy"}
+                        {deployBtn.label}
                     </button>
-                    {confirmArmed && !busy && (
-                        <p className="hint">
-                            {preflightBusy
-                                ? "Checks are still running — tap again to deploy without waiting."
-                                : "Some checks didn't pass — the deploy may fail or waste a transaction. Tap again to proceed."}
-                        </p>
+                    {/* A fresh check that didn't pass: re-check is the primary
+                        fix, but the chain is the real authority, so offer a
+                        direct deploy beside it (advice, not a block). */}
+                    {deployBtn.mode === "checkAgain" && (
+                        <button
+                            type="button"
+                            className="pill pill-secondary pill-wide"
+                            onClick={() => void deploy()}
+                        >
+                            Try to deploy anyway
+                        </button>
                     )}
 
                     {busy && status && deployStep !== null && (
@@ -1271,60 +1430,72 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                             steps={DEPLOY_STEPS}
                             step={deployStep}
                             status={status}
+                            phoneSteps={DEPLOY_PHONE_STEPS}
                         />
                     )}
 
-                    {result && (
-                        <div className="result result-stored">
-                            <Row label="bytes">{result.bytes.toLocaleString()} B</Row>
-                            <Row label="CID" mono>
-                                {result.cid}
-                            </Row>
-                            <Row label="gateway">
-                                <a href={result.gatewayUrl} target="_blank" rel="noopener">
-                                    {result.gatewayUrl}
-                                </a>
-                            </Row>
-                            {result.blockNumber !== null && (
-                                <Row label="block">
-                                    #{result.blockNumber.toLocaleString()}
-                                </Row>
-                            )}
-                            {result.dotMapped ? (
-                                <p className="result-note success">
-                                    Live on{" "}
-                                    <a href={result.url} target="_blank" rel="noopener">
-                                        {result.url}
-                                    </a>
-                                    . Resolution may take a few seconds to propagate.
+                    {/* Partial success: bytes are on Bulletin but the .dot
+                        mapping failed — the site is reachable via the gateway. */}
+                    {result && !result.dotMapped && (() => {
+                        const action = failureAction(
+                            result.dotError ?? "",
+                            "Check your balance or pick a different name, then deploy again.",
+                        );
+                        return (
+                            <div className="result result-partial">
+                                <p className="result-live-title">
+                                    <CheckIcon size={18} /> Your site is live
                                 </p>
-                            ) : (
-                                <div className="result-note">
-                                    <p>
-                                        Stored on Bulletin ✓. The{" "}
-                                        <code>.{DOT_HOST}</code> mapping step failed.
-                                        Bytes still retrievable via the gateway link.
-                                    </p>
-                                    {result.dotError && (
-                                        <pre className="error-block">
-                                            {result.dotError}
-                                        </pre>
-                                    )}
-                                    {result.dotError && (
-                                        <DotErrorHint
-                                            message={result.dotError}
-                                            address={activeAccount?.address ?? ""}
-                                        />
-                                    )}
+                                <div className="result-link-row">
+                                    <a
+                                        className="result-link"
+                                        href={result.gatewayUrl}
+                                        target="_blank"
+                                        rel="noopener"
+                                    >
+                                        {result.gatewayUrl}
+                                    </a>
                                 </div>
-                            )}
-                        </div>
-                    )}
-                    {deployError && (
-                        <pre className="error error-block">{deployError}</pre>
+                                <p className="result-note">
+                                    We weren't able to register your domain:{" "}
+                                    <code>{result.domain}.{DOT_HOST}</code>. {action}
+                                </p>
+                                {result.dotError && (
+                                    <button
+                                        type="button"
+                                        className="link-btn"
+                                        onClick={() => setLogsText(result.dotError)}
+                                    >
+                                        View logs
+                                    </button>
+                                )}
+                            </div>
+                        );
+                    })()}
+                    {deployError && (() => {
+                        const action = failureAction(
+                            deployError,
+                            "Check your balance, then deploy again.",
+                        );
+                        return (
+                            <div className="result result-error">
+                                <p className="result-fail-title">Deployment didn't finish</p>
+                                <p className="result-note">{action}</p>
+                                <button
+                                    type="button"
+                                    className="link-btn"
+                                    onClick={() => setLogsText(deployError)}
+                                >
+                                    View logs
+                                </button>
+                            </div>
+                        );
+                    })()}
+                    </>
                     )}
                 </div>
             )}
+            {logsText && <LogsModal text={logsText} onClose={() => setLogsText(null)} />}
 
             {/* Bottom centered nav — 3 tabs, always visible. */}
             <nav className="bottom-nav" aria-label="View">
@@ -1412,22 +1583,99 @@ export default function App() {
     return <Editor key={entry.id} entry={entry} onExit={() => setEntry(null)} />;
 }
 
+// Map a raw failure (deploy error / dotError) to one plain-English next action.
+// Timeout first: a stalled connection (deadline.ts) isn't an on-chain failure,
+// and retrying is safe because completed steps are reused.
+function failureAction(message: string, fallback: string): string {
+    const m = message.toLowerCase();
+    if (m.includes("timed out") || m.includes("took too long")) {
+        return "The connection stalled before this step finished — your completed steps are saved, so just deploy again.";
+    }
+    if (
+        m.includes("balance") ||
+        m.includes("transferfailed") ||
+        m.includes("fundsunavailable") ||
+        m.includes("inability to pay") ||
+        m.includes("storage deposit")
+    ) {
+        return "Add some test tokens to your account, then deploy again.";
+    }
+    if (m.includes("already registered") || m.includes("already taken")) {
+        return "That name is taken — pick another, then deploy again.";
+    }
+    if (m.includes("accountunmapped") || m.includes("mapping did not propagate")) {
+        return "Your account is still finishing setup — wait a moment, then deploy again.";
+    }
+    return fallback;
+}
+
+// Raw technical detail, tucked behind a "View logs" link so the failure cards
+// stay plain-English. Self-contained overlay (no shared modal dependency).
+function LogsModal({ text, onClose }: { text: string; onClose: () => void }) {
+    const [copied, setCopied] = useState(false);
+    const copy = async () => {
+        if (await copyText(text)) {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+        }
+    };
+    return (
+        <div className="logs-modal-backdrop" onClick={onClose}>
+            <div
+                className="logs-modal"
+                role="dialog"
+                aria-label="Deploy logs"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="logs-modal-head">
+                    <span>Deploy logs</span>
+                    <button type="button" className="logs-modal-close" onClick={onClose} aria-label="Close">
+                        ×
+                    </button>
+                </div>
+                <p className="hint subtle">Technical detail for debugging — share this with a developer.</p>
+                <pre className="logs-modal-body">{text}</pre>
+                <button type="button" className="pill pill-wide" onClick={copy}>
+                    {copied ? "Copied" : "Copy logs"}
+                </button>
+            </div>
+        </div>
+    );
+}
+
 // How long a single deploy step may run before the progress UI adds a "still
 // working" reassurance. The eased fill (progress.ts) is flat near its cap by
 // ~25s, so a step sitting past this should be told it isn't frozen.
 const SLOW_STEP_HINT_MS = 18_000;
 
+// Deploy steps whose transaction the user approves on their phone (host route)
+// or signs in their extension — StepProgress shows a "check your phone" hint
+// while one is active. The read-only dry-runs (account / name) are excluded.
+const DEPLOY_PHONE_STEPS: ReadonlySet<string> = new Set([
+    "prepare",
+    "bulletin",
+    "commit",
+    "register",
+    "link",
+]);
+
 function StepProgress({
     steps,
     step,
     status,
+    phoneSteps,
 }: {
     steps: readonly ProgressStep[];
     step: number;
     status: string;
+    /** Step ids whose tx the user approves on their phone / signs in their
+     *  extension — when the active step is one of these, a "check your phone"
+     *  hint is shown. */
+    phoneSteps?: ReadonlySet<string>;
 }) {
     const currentStep = steps[Math.min(step, steps.length - 1)];
     const stepNumber = Math.min(step + 1, steps.length);
+    const needsPhone = phoneSteps?.has(currentStep.id) ?? false;
 
     // Eased within-step fill for the active segment. The chain layer gives no
     // sub-progress for the slow broadcast/in-block wait, so we animate EXPECTED
@@ -1486,7 +1734,12 @@ function StepProgress({
                 ))}
             </div>
             <div className="status">{status}</div>
-            {slow && (
+            {needsPhone && (
+                <div className="progress-phone-hint" role="status">
+                    📱 Check your phone — approve this step to continue.
+                </div>
+            )}
+            {slow && !needsPhone && (
                 <div className="progress-slow-hint" role="status">
                     Still working — this can take a moment.
                 </div>
@@ -2075,100 +2328,7 @@ function VariantToggle({
 // Heuristic hint mapping common DotNS failures to actionable next steps.
 // The error strings come from pallet-revive dispatch errors, JSON-serialised
 // in submit-and-wait, so they're greppable.
-function DotErrorHint({ message, address }: { message: string; address: string }) {
-    const lower = message.toLowerCase();
 
-    if (
-        lower.includes("balance") ||
-        lower.includes("transferfailed") ||
-        lower.includes("fundsunavailable") ||
-        lower.includes("inability to pay") ||
-        lower.includes("storage deposit")
-    ) {
-        return (
-            <p className="hint">
-                <strong>Likely cause:</strong> the account doesn't have enough PAS
-                on Asset Hub Next — the domain price and storage deposits are paid
-                from the account itself (even when fees are host-sponsored). Hit
-                the{" "}
-                <a href={PAS_FAUCET_URL} target="_blank" rel="noopener">
-                    Asset Hub faucet
-                </a>
-                {address && (
-                    <>
-                        {" "}
-                        (paste the account address: <code>{address}</code>)
-                    </>
-                )}{" "}
-                and retry.
-            </p>
-        );
-    }
-
-    if (lower.includes("already registered") || lower.includes("already taken")) {
-        return (
-            <p className="hint">
-                <strong>Likely cause:</strong> someone else already registered this
-                name. Pick a different <code>.dot</code> name and retry.
-            </p>
-        );
-    }
-
-    if (lower.includes("accountunmapped") || lower.includes("mapping did not propagate")) {
-        return (
-            <p className="hint">
-                <strong>Likely cause:</strong> the account's SS58 → H160 mapping
-                hasn't landed yet. Wait ~30 s and retry — the map_account extrinsic
-                needs to finalise before contracts will accept calls.
-            </p>
-        );
-    }
-
-    if (lower.includes("commitment") && lower.includes("not found")) {
-        return (
-            <p className="hint">
-                <strong>Likely cause:</strong> the commitment expired between the
-                two-step register. Just retry — the commit-reveal flow restarts from
-                scratch.
-            </p>
-        );
-    }
-
-    if (lower.includes("priceofcommitmenttoolow") || lower.includes("invalidpayment")) {
-        return (
-            <p className="hint">
-                <strong>Likely cause:</strong> the price the contract demanded
-                exceeded our 10 % buffer (PoP rules may have changed mid-flight).
-                Retry — the price is re-quoted each attempt.
-            </p>
-        );
-    }
-
-    return (
-        <p className="hint">
-            Unknown failure. The dispatch-error JSON above is from pallet-revive —
-            pasting it into chat will help diagnose. Common culprits: the account
-            has no PAS for fees, name already taken, or the AH-Next RPC choked.
-        </p>
-    );
-}
-
-function Row({
-    label,
-    children,
-    mono,
-}: {
-    label: string;
-    children: React.ReactNode;
-    mono?: boolean;
-}) {
-    return (
-        <div className="row-line">
-            <span className="row-label">{label}</span>
-            <span className={`row-value${mono ? " mono" : ""}`}>{children}</span>
-        </div>
-    );
-}
 
 // Inline SVG icons. Lightweight, no dep.
 function UndoIcon() {
@@ -2209,6 +2369,21 @@ function BackIcon() {
     return (
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M15 18l-6-6 6-6" />
+        </svg>
+    );
+}
+function CheckIcon({ size = 18 }: { size?: number }) {
+    return (
+        <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M20 6L9 17l-5-5" />
+        </svg>
+    );
+}
+function CopyIcon({ size = 15 }: { size?: number }) {
+    return (
+        <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
         </svg>
     );
 }

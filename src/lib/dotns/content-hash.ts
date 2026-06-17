@@ -1,7 +1,7 @@
 // IPFS content-hash encoding + setContenthash submission. Binds the
 // registered `<label>.dot` node to the CID stored on Bulletin.
 
-import { encodeFunctionData } from "viem";
+import { decodeFunctionResult, encodeFunctionData } from "viem";
 import type { PolkadotSigner } from "polkadot-api";
 import { encode as encodeContentHash } from "@ensdomains/content-hash";
 import { DOTNS_CONTRACTS } from "../polkadot/constants.ts";
@@ -17,6 +17,39 @@ import {
 export function encodeIpfsContenthash(cidString: string): `0x${string}` {
     const encoded = encodeContentHash("ipfs", cidString);
     return `0x${encoded}` as `0x${string}`;
+}
+
+/**
+ * Read a domain's resolver contenthash at the FINALIZED block — the head a
+ * gateway / host resolver actually serves. Returns the raw 0x bytes, or null
+ * when unset / unreadable. The post-deploy poll compares this against the CID
+ * just written (encodeIpfsContenthash) to confirm the site resolves before
+ * offering "Open your site".
+ */
+export async function readContentHashFinalized(
+    label: string,
+    callerAddress: string,
+): Promise<`0x${string}` | null> {
+    const node = namehash(labelToFullName(label));
+    const encoded = encodeFunctionData({
+        abi: CONTENT_RESOLVER_ABI,
+        functionName: "contenthash",
+        args: [node],
+    });
+    const result = await dryRunContractCall(
+        DOTNS_CONTRACTS.contentResolver,
+        callerAddress,
+        encoded,
+        0n,
+        "finalized",
+    );
+    if (!result.success || !result.returnData || result.returnData === "0x") return null;
+    const decoded = decodeFunctionResult({
+        abi: CONTENT_RESOLVER_ABI,
+        functionName: "contenthash",
+        data: result.returnData,
+    }) as `0x${string}`;
+    return decoded && decoded !== "0x" ? decoded : null;
 }
 
 export async function setContentHash(params: {

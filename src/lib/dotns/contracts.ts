@@ -127,6 +127,10 @@ export async function dryRunContractCall(
     callerAddress: string,
     encodedData: `0x${string}`,
     value: bigint = 0n,
+    // Block to read against. "best" (default) = the latest known block, which
+    // the existing dry-runs rely on. Pass "finalized" for reads that must
+    // reflect the head gateways/resolvers see (the post-deploy contenthash poll).
+    at: "best" | "finalized" = "best",
 ): Promise<DryRunResult> {
     const { unsafeApi } = getAssetHubClient();
 
@@ -137,6 +141,7 @@ export async function dryRunContractCall(
         { ref_time: MAX_WEIGHT, proof_size: MAX_WEIGHT },
         MAX_WEIGHT,
         Binary.fromHex(encodedData),
+        { at },
     );
 
     const r = dryRun as {
