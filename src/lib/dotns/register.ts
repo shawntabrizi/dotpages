@@ -180,14 +180,14 @@ export async function commitDomain(params: {
 }): Promise<DomainCommitment> {
     const { label, ownerEvmAddress, signerAddress, signer, onStatus } = params;
 
-    onStatus?.("Mapping account on Asset Hub…");
+    onStatus?.("Setting up your account…");
     await ensureAccountMapped(signerAddress, signer);
 
     const secret = generateSecret();
     const registration = { label, owner: ownerEvmAddress, secret, reserved: false };
 
     // 1. Compute commitment (read-only)
-    onStatus?.("Computing commitment…");
+    onStatus?.("Preparing your reservation…");
     const makeCommitmentData = encodeFunctionData({
         abi: REGISTRAR_CONTROLLER_ABI,
         functionName: "makeCommitment",
@@ -208,7 +208,7 @@ export async function commitDomain(params: {
     });
 
     // 2. Submit commitment (extrinsic)
-    onStatus?.("Submitting commitment…");
+    onStatus?.("Reserving your name…");
     const commitData = encodeFunctionData({
         abi: REGISTRAR_CONTROLLER_ABI,
         functionName: "commit",
@@ -228,8 +228,8 @@ export async function commitDomain(params: {
         commitGas.gasConsumed,
         commitGas.storageDeposit,
         (status) => {
-            if (status === "signing") onStatus?.("Signing commitment…");
-            if (status === "in-block") onStatus?.("Commitment confirmed");
+            if (status === "signing") onStatus?.("Signing reservation…");
+            if (status === "in-block") onStatus?.("Reservation confirmed");
         },
     );
 
@@ -284,7 +284,7 @@ export async function finishRegistration(params: {
     for (let attempt = 1; !registerGas.success && attempt <= 10; attempt++) {
         const selector = revertSelector(registerGas.returnData);
         if (!selector || !TRANSIENT.has(selector)) break;
-        onStatus?.(`Commitment not visible yet — retrying (${attempt}/10)…`);
+        onStatus?.(`Reservation not confirmed yet — retrying (${attempt}/10)…`);
         await new Promise((r) => setTimeout(r, 3000));
         registerGas = await dryRunContractCall(
             DOTNS_CONTRACTS.registrarController,

@@ -89,7 +89,7 @@ export async function deployFull(
     // version's behavior.
     let commitment: Awaited<ReturnType<typeof commitDomain>> | null = null;
     try {
-        onStatus("DotNS: resolving owner H160…");
+        onStatus("DotNS: resolving owner account…");
         const ownerEvmAddress = await getEvmAddress(account.address);
 
         onStatus("DotNS: checking domain availability…");
@@ -107,7 +107,7 @@ export async function deployFull(
                         ` (your account maps to ${ownerEvmAddress}). Pick another name.`,
                 );
             }
-            onStatus("DotNS: name already yours — updating content…");
+            onStatus("DotNS: domain name already yours — updating content…");
             // commitDomain normally handles the one-time H160 mapping;
             // the update path needs it ensured before the resolver call.
             await ensureAccountMapped(account.address, account.signer);
