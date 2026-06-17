@@ -105,7 +105,7 @@ export function isLightBackground(bg: string): boolean {
     if (!parts) return false;
     const [r, g, b] = parts.map((h) => parseInt(h, 16) / 255);
     const lin = (c: number) =>
-        c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+        c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
     const lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
     return lum >= 0.179;
 }
@@ -341,7 +341,7 @@ export interface DocumentParts {
 // Assemble panes into the final single-file artifact. The <script> tag is
 // omitted entirely when there's no JS, so blocks/markdown output stays JS-free.
 export function assembleDocument({ title, css, bodyHtml, js }: DocumentParts): string {
-    const script = js && js.trim() ? `\n<script>\n${js}\n</script>` : "";
+    const script = js?.trim() ? `\n<script>\n${js}\n</script>` : "";
     return `<!doctype html>
 <html lang="en">
 <head>

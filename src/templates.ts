@@ -5,7 +5,7 @@
 // the user could add from the + menu and style with the per-block toggles —
 // nothing is locked, special-cased, or otherwise unbuildable by hand.
 
-import { type SiteContent } from "./template.ts";
+import type { SiteContent } from "./template.ts";
 
 function id(): string {
     return Math.random().toString(36).slice(2, 10);

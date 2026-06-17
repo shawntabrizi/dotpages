@@ -275,7 +275,7 @@ export default function Landing({
     const atCap = drafts.length >= MAX_DRAFTS;
     // The undo slot belongs to whichever section the removed record came from.
     const undoForDrafts = undoable && !undoable.record.deployment ? undoable : null;
-    const undoForPublished = undoable && undoable.record.deployment ? undoable : null;
+    const undoForPublished = undoable?.record.deployment ? undoable : null;
     return (
         <div className="builder-landing">
             <header className="builder-landing-header">

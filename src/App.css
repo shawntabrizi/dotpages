@@ -100,6 +100,7 @@ body {
     to { transform: rotate(360deg); }
 }
 @keyframes upload-pulse {
+    /* biome-ignore lint/suspicious/noShorthandPropertyOverrides: animates .site-image-placeholder.is-uploading; the border-top-color longhand belongs to the unrelated .upload-spinner rule, so there is no real override */
     50% { border-color: color-mix(in srgb, var(--site-accent, #e6007a), transparent 75%); }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1566,6 +1567,8 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
     .result-success-dot { animation: none; }
+}
+
 /* Account / login widget (AccountBar) — homepage header + editor deploy panel. */
 .account-bar { position: relative; display: inline-block; }
 .account-trigger {
@@ -1664,6 +1667,7 @@ body {
     font-size: 11px;
     color: var(--danger);
     word-break: break-word;
+}
 /* "Unpublished changes" badge on a published-site card — top-left, opposite
    the × . Non-interactive: the card click still opens the editor. */
 .builder-card-pill {
