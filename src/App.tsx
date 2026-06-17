@@ -26,7 +26,8 @@ import {
 // their call sites via dynamic import(); only their TYPES are imported
 // statically (erased at compile time).
 import type { DeploySuccess } from "./deploy.ts";
-import type { PreflightReport } from "./preflight.ts";
+import { type PreflightReport, validateLabel } from "./preflight.ts";
+import { deployButtonState } from "./deployButton.ts";
 import { deriveDomain } from "./derive-domain.ts";
 import { signInToHost, useHostState } from "./signer.ts";
 import { ensureHostPermission } from "./lib/host/permissions.ts";
@@ -313,10 +314,14 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
     const [autoLabel, setAutoLabel] = useState<string | null>(null);
     const [preflight, setPreflight] = useState<PreflightReport | null>(null);
     const [preflightBusy, setPreflightBusy] = useState(false);
-    // Failed checks don't hard-block Deploy — the first click arms an
-    // "are you sure" confirmation, the second deploys anyway. The chain is
-    // the real authority; the checklist is advice.
-    const [confirmArmed, setConfirmArmed] = useState(false);
+    // The label the last completed check ran for — drives `checkFresh`. A name
+    // edit invalidates it, so the button reverts from "Deploy" to re-checking.
+    const [checkedLabel, setCheckedLabel] = useState<string | null>(null);
+    // The last check attempt errored (flaky RPC) — surfaces "Check again".
+    const [preflightFailed, setPreflightFailed] = useState(false);
+    // Bumped by "Check again" to force a re-run of the (otherwise input-driven)
+    // pre-flight effect.
+    const [recheckNonce, setRecheckNonce] = useState(0);
     const [copiedAddress, setCopiedAddress] = useState(false);
     const effectiveLabel = domain.trim().replace(/\.dot$/i, "") || autoLabel || "";
 
@@ -340,8 +345,8 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
         }
         let cancelled = false;
         setPreflightBusy(true);
+        setPreflightFailed(false);
         setResult(null); // inputs changed — a previous deploy result is stale
-        setConfirmArmed(false); // …and so is an armed "deploy anyway"
         const t = setTimeout(() => {
             import("./preflight.ts")
                 .then(({ runPreflight }) =>
@@ -352,10 +357,15 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                     }),
                 )
                 .then((report) => {
-                    if (!cancelled) setPreflight(report);
+                    if (cancelled) return;
+                    setPreflight(report);
+                    setCheckedLabel(effectiveLabel);
                 })
                 .catch(() => {
-                    if (!cancelled) setPreflight(null);
+                    if (cancelled) return;
+                    setPreflight(null);
+                    setPreflightFailed(true);
+                    setCheckedLabel(effectiveLabel);
                 })
                 .finally(() => {
                     if (!cancelled) setPreflightBusy(false);
@@ -367,7 +377,8 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
         };
         // currentHtml is stable for a given content/mode; content edits can
         // only happen in the edit view, so the `view` dep re-checks on return.
-    }, [view, effectiveLabel, activeAccount]); // eslint-disable-line react-hooks/exhaustive-deps
+        // recheckNonce lets "Check again" force a re-run.
+    }, [view, effectiveLabel, activeAccount, recheckNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Debounced draft autosave — every edit lands in localStorage shortly after.
     const draft: Draft = { mode, content, markdownText, htmlText, cssText, jsText };
@@ -705,17 +716,28 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
         isEditing && mode === "blocks"
             ? content.blocks.find((b) => b.id === editingBlockId) ?? null
             : null;
-    // Only hard requirements disable Deploy (a signer and a name). Failed
-    // checks instead arm a confirm step — see onDeployClick.
-    const canDeploy = !busy && activeAccount !== null && effectiveLabel !== "";
-    const checksClean = preflight !== null && preflight.ok && !preflightBusy;
-    const onDeployClick = () => {
-        if (!checksClean && !confirmArmed) {
-            setConfirmArmed(true);
-            return;
-        }
-        setConfirmArmed(false);
-        void deploy();
+    // Primary deploy-button state (pure derivation). The checklist auto-runs,
+    // so a fresh result is usually already in hand: a clean pass shows "Deploy";
+    // a non-pass shows "Check again" + a secondary "Try to deploy anyway".
+    const checkFresh = checkedLabel !== null && checkedLabel === effectiveLabel;
+    const localOk = effectiveLabel !== "" && validateLabel(effectiveLabel) === null;
+    const deployBtn = deployButtonState({
+        busy,
+        preflightBusy,
+        hasAccount: activeAccount !== null,
+        hasName: effectiveLabel !== "",
+        localOk,
+        checkFresh,
+        preflightOk: preflight?.ok ?? null,
+        preflightFailed,
+    });
+    const runCheck = () => setRecheckNonce((n) => n + 1);
+    const onPrimaryClick = () => {
+        // "deploy" = a fresh pass → deploy. "check"/"checkAgain" → (re-)run the
+        // bounded check. The chain re-verifies, so "Try to deploy anyway" (the
+        // secondary, rendered on checkAgain) is the escape hatch.
+        if (deployBtn.mode === "deploy") void deploy();
+        else runCheck();
     };
     const copyAddress = async () => {
         if (!activeAccount) return;
@@ -1301,24 +1323,23 @@ function Editor({ entry, onExit }: { entry: BuilderEntry; onExit: () => void }) 
                     )}
 
                     <button
-                        className={`pill pill-primary pill-wide${confirmArmed ? " pill-confirm" : ""}`}
-                        onClick={onDeployClick}
-                        disabled={!canDeploy}
+                        className="pill pill-primary pill-wide"
+                        onClick={onPrimaryClick}
+                        disabled={deployBtn.disabled}
                     >
-                        {busy
-                            ? "Deploying…"
-                            : confirmArmed
-                              ? "Deploy anyway?"
-                              : preflightBusy
-                                ? "Checking…"
-                                : "Deploy"}
+                        {deployBtn.label}
                     </button>
-                    {confirmArmed && !busy && (
-                        <p className="hint">
-                            {preflightBusy
-                                ? "Checks are still running — tap again to deploy without waiting."
-                                : "Some checks didn't pass — the deploy may fail or waste a transaction. Tap again to proceed."}
-                        </p>
+                    {/* A fresh check that didn't pass: re-check is the primary
+                        fix, but the chain is the real authority, so offer a
+                        direct deploy beside it (advice, not a block). */}
+                    {deployBtn.mode === "checkAgain" && (
+                        <button
+                            type="button"
+                            className="pill pill-secondary pill-wide"
+                            onClick={() => void deploy()}
+                        >
+                            Try to deploy anyway
+                        </button>
                     )}
 
                     {busy && status && deployStep !== null && (
