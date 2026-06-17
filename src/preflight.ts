@@ -26,6 +26,14 @@ import {
 
 export type CheckState = "ok" | "warn" | "fail";
 
+/** Append `address=<acct>` to a faucet URL, preserving any existing query
+ *  (the PAS faucet already carries `?parachain=<id>`), so "faucet" lands on a
+ *  form pre-filled for the account that needs funding. */
+export function withAddress(url: string, address: string): string {
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}address=${encodeURIComponent(address)}`;
+}
+
 export interface PreflightCheck {
     id: "size" | "bulletin" | "name" | "funds" | "mapped";
     label: string;
@@ -86,6 +94,25 @@ const verifyLater = (id: PreflightCheck["id"], label: string): PreflightCheck =>
     tech: "Check timed out or the RPC errored (read-only — deploy re-verifies).",
     link: null,
 });
+
+// Each chain check catches its own errors, but a hung RPC connection never
+// rejects — it just stays pending, pinning the UI on "checking…" forever.
+// Racing against a deadline makes the report total: worst case is a row of
+// "couldn't verify" warns, and the checklist is advisory anyway (deploy
+// re-verifies everything on-chain).
+const CHECK_TIMEOUT_MS = 5_000;
+
+const guarded = (
+    id: PreflightCheck["id"],
+    label: string,
+    check: () => Promise<PreflightCheck>,
+): Promise<PreflightCheck> =>
+    Promise.race([
+        check().catch(() => verifyLater(id, label)),
+        new Promise<PreflightCheck>((resolve) =>
+            setTimeout(() => resolve(verifyLater(id, label)), CHECK_TIMEOUT_MS),
+        ),
+    ]);
 
 export async function runPreflight(params: {
     html: string;
@@ -236,7 +263,7 @@ export async function runPreflight(params: {
                 state: "fail",
                 detail: "Test tokens are needed to register your .dot name.",
                 tech: `0 PAS free on Asset Hub${account.source === "host" ? " (fees host-sponsored, but the domain price + deposits aren't)" : ""}`,
-                link: PAS_FAUCET_URL,
+                link: withAddress(PAS_FAUCET_URL, account.address),
             };
         }
         return {
@@ -265,10 +292,10 @@ export async function runPreflight(params: {
     };
 
     const [bulletin, name, funds, mapped] = await Promise.all([
-        bulletinCheck().catch(() => verifyLater("bulletin", "Bulletin storage")),
-        nameCheck().catch(() => verifyLater("name", ".dot name")),
-        fundsCheck().catch(() => verifyLater("funds", "Funds")),
-        mappedCheck().catch(() => verifyLater("mapped", "Account setup")),
+        guarded("bulletin", "Bulletin storage", bulletinCheck),
+        guarded("name", ".dot name", nameCheck),
+        guarded("funds", "Funds", fundsCheck),
+        guarded("mapped", "Account setup", mappedCheck),
     ]);
 
     // Cross-check once both sides are known: balance vs price + headroom
@@ -283,7 +310,7 @@ export async function runPreflight(params: {
         funds.state = "warn";
         funds.detail = "You're close — top up to cover the registration fees.";
         funds.tech = `${formatPas(freeNative)} free vs price ${formatPas(priceNative)} + ~${formatPas(FEE_MARGIN)} fees/deposits`;
-        funds.link = PAS_FAUCET_URL;
+        funds.link = withAddress(PAS_FAUCET_URL, account.address);
     }
 
     const checks = [sizeCheck, bulletin, name, funds, mapped];
